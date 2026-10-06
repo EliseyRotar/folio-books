@@ -92,27 +92,29 @@
     return;
   }
 
-  function initials(t) {
-    const w = String(t || "").trim().split(/\s+/).filter(Boolean).slice(0, 2);
-    return w.map((x) => x[0]).join("").toUpperCase() || "?";
-  }
-
   function card(b) {
     const a = document.createElement("a");
     a.className = "cat-card";
     a.href = "read.html?id=" + encodeURIComponent(b.id);
-    const cover = b.cover
-      ? `<div class="cat-cover"><img src="${F.esc(b.cover)}" alt="" loading="lazy"></div>`
-      : `<div class="cat-cover" aria-hidden="true">${F.esc(initials(b.title))}</div>`;
+    const coverWrap = document.createElement("div");
+    coverWrap.className = "cat-cover";
+    coverWrap.appendChild(F.coverEl(F.coversList(b)));
+    const h3 = document.createElement("h3");
+    h3.textContent = b.title || "Untitled";
     const who = [b.author, b.platform].filter(Boolean).map(F.esc).join(" · ") || (b.isbn ? "ISBN " + F.esc(b.isbn) : "");
-    const state = b.hasPdf
-      ? `<div class="st pinned">${b.pages ? b.pages + (b.pages === 1 ? " page · " : " pages · ") : ""}${F.fmtBytes(b.size || 0)}</div>`
-      : `<div class="st">metadata only</div>`;
-    a.innerHTML =
-      cover +
-      `<h3>${F.esc(b.title || "Untitled")}</h3>` +
-      (who ? `<div class="who">${who}</div>` : "") +
-      state;
+    const st = document.createElement("div");
+    st.className = b.hasPdf ? "st pinned" : "st";
+    st.textContent = b.hasPdf
+      ? (b.pages ? b.pages + (b.pages === 1 ? " page · " : " pages · ") : "") + F.fmtBytes(b.size || 0)
+      : "metadata only";
+    a.append(coverWrap, h3);
+    if (who) {
+      const w = document.createElement("div");
+      w.className = "who";
+      w.innerHTML = who;
+      a.appendChild(w);
+    }
+    a.appendChild(st);
     a.dataset.hay = ((b.title || "") + " " + (b.author || "") + " " + (b.isbn || "") + " " + (b.platform || "")).toLowerCase();
     return a;
   }
@@ -123,7 +125,19 @@
     const shown = needle
       ? books.filter((b) => ((b.title || "") + " " + (b.author || "") + " " + (b.isbn || "") + " " + (b.platform || "")).toLowerCase().indexOf(needle) >= 0)
       : books;
-    for (const b of shown) grid.appendChild(card(b));
+    for (const b of shown) {
+      const a = card(b);
+      grid.appendChild(a);
+      // No direct candidate (older rows carry neither cover nor ISBN):
+      // ask Google Books by title, then swap the result in.
+      if (!F.coversList(b).length && b.title) {
+        F.coversOf({ title: b.title, isbn: b.isbn }).then((list) => {
+          if (!list.length || !a.isConnected) return;
+          const wrap = a.querySelector(".cat-cover");
+          if (wrap) { wrap.innerHTML = ""; wrap.appendChild(F.coverEl(list)); }
+        }).catch(() => {});
+      }
+    }
     count.textContent = shown.length + (shown.length === 1 ? " book" : " books");
     empty.hidden = books.length > 0;
     if (books.length && !shown.length) {

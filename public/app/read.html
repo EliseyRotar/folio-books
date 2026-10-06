@@ -93,30 +93,19 @@
 
   if (!id) { location.replace("catalog.html"); return; }
 
-  function initials(t) {
-    const w = String(t || "").trim().split(/\s+/).filter(Boolean).slice(0, 2);
-    return w.map((x) => x[0]).join("").toUpperCase() || "?";
-  }
-
   function setCover(book) {
     const slot = $("cover-slot");
-    if (book.cover) {
-      const img = document.createElement("img");
-      img.className = "landing-cover";
-      img.alt = "";
-      img.addEventListener("error", () => {
-        slot.innerHTML = "";
-        const d = document.createElement("div");
-        d.className = "landing-cover fallback";
-        d.textContent = initials(book.title);
-        slot.appendChild(d);
-      });
-      img.src = book.cover;
-      slot.appendChild(img);
-    } else {
-      slot.innerHTML = '<div class="landing-cover fallback" aria-hidden="true"></div>';
-      slot.firstChild.textContent = initials(book.title);
+    const direct = F.coversList(book);
+    if (direct.length) {
+      slot.appendChild(F.coverEl(direct, "landing-cover fallback"));
+      return;
     }
+    slot.appendChild(F.coverEl([], "landing-cover fallback"));
+    F.coversOf({ title: book.title, isbn: book.isbn }).then((list) => {
+      if (!list.length) return;
+      slot.innerHTML = "";
+      slot.appendChild(F.coverEl(list, "landing-cover fallback"));
+    }).catch(() => {});
   }
 
   function fact(v) { return v ? '<span>' + F.esc(v) + "</span>" : ""; }

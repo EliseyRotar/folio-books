@@ -22,47 +22,9 @@ C.deviceId = function deviceId() {
 
 
   // ----- book covers -------------------------------------------------
-  // Fetch the cover for an ISBN once, at add-time: try the credential-free
-  // Open Library Covers API (by ISBN), then Google Books, then give up — a
-  // bare title row is fine. The image bytes are stored right in the Cabinet
-  // (base64 in the book row) so the shelf renders instantly and offline.
-  C.coverIsbn = async function coverIsbn(isbn) {
-    if (!isbn) return "";
-    const id = (isbn || "").replace(/[^0-9Xx]/g, "");
-    if (!id) return "";
-    const tag = "cover:" + id;
-    if (localStorage[LS_PREFIX + tag]) return localStorage[LS_PREFIX + tag];
-    const tryUrl = async (url) => {
-      try {
-        const r = await fetch(url);
-        if (!r.ok) return null;
-        const buf = await r.arrayBuffer();
-        const b64 = bytesToB64(new Uint8Array(buf));
-        return "data:image/jpeg;base64," + b64;
-      } catch (_) { return null; }
-    };
-    let data = null;
-    const ol = "https://covers.openlibrary.org/b/isbn/" + id + "-M.jpg";
-    data = await tryUrl(ol);
-    if (!data) {
-      try {
-        const r = await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:" + id + "&projection=lite");
-        const j = await r.json();
-        for (const src of ["medium", "large", "thumbnail"]) {
-          const u = j && j.items && j.items[0] && j.items[0].volumeInfo && j.items[0].volumeInfo.imageLinks && j.items[0].volumeInfo.imageLinks[src];
-          if (u) { data = await tryUrl(u); if (data) break; }
-        }
-      } catch (_) {}
-    }
-    if (data) { try { localStorage[LS_PREFIX + tag] = data; } catch (_) {} }
-    return data;
-  };
-
-  function bytesToB64(bytes) {
-    let bin = "";
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    return btoa(bin);
-  }
+  // Covers are candidate URL lists (F.coversOf in common.js) — the shelf
+  // and the catalog try them in order and fall back to a silhouette. No
+  // bytes are cached in the Cabinet.
 
   function defaultData() {
 

@@ -139,3 +139,150 @@ F.ensure = async function ensure({ sql, jszip, pdflib }) {
 
 F.esc = (s) => String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ----- covers ------------------------------------------------------------
+// A shelf row carries an ordered list of candidate cover URLs. The first
+// that actually renders a real image (>=10px — Amazon serves a 1x1 pixel
+// for unknown ISBNs) wins; if every candidate fails we show a book
+// silhouette, never letters.
+
+const BOOK_SVG =
+  '<svg viewBox="0 0 24 24" width="55%" height="55%" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">' +
+  '<path d="M4 4.5h6.2c1 0 1.8.8 1.8 1.8V20a2.2 2.2 0 0 0-2.2-2.2H4V4.5Z"/>' +
+  '<path d="M20 4.5h-6.2c-1 0-1.8.8-1.8 1.8V20a2.2 2.2 0 0 1 2.2-2.2H20V4.5Z"/>' +
+  '<path d="M12 6.3v11.5"/></svg>';
+
+F.coverPh = function coverPh(phClass) {
+  const d = document.createElement("div");
+  d.className = "cover-ph" + (phClass ? " " + phClass : "");
+  d.setAttribute("aria-hidden", "true");
+  d.innerHTML = BOOK_SVG;
+  return d;
+};
+
+// ISBN -> ordered https candidates (no API keys, all hotlinkable).
+F.staticCovers = function staticCovers(isbn) {
+  const id = String(isbn || "").replace(/[^0-9Xx]/g, "");
+  if (id.length !== 10 && id.length !== 13) return [];
+  const isbn13 = id.length === 13 ? id : isbn13of(id);
+  const isbn10 = id.length === 10 ? id : isbn10of(id);
+  const out = [
+    "https://covers.openlibrary.org/b/isbn/" + isbn13 + "-L.jpg?default=false",
+    isbn10 ? "https://images-na.ssl-images-amazon.com/images/P/" + isbn10 + ".01.LZZZZZZZ.jpg" : "",
+    isbn10 ? "https://books.google.com/books/content?vid=ISBN" + isbn10 + "&printsec=frontcover&img=1&zoom=2" : "",
+    "https://covers.openlibrary.org/b/isbn/" + isbn10 + "-L.jpg?default=false"
+  ].filter(Boolean);
+  // de-dupe (isbn10 === isbn13 impossible, but cheap to guard)
+  return [...new Set(out)];
+};
+
+function isbn13of(i10) {
+  const core = "978" + i10.slice(0, 9);
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += Number(core[i]) * (i % 2 ? 3 : 1);
+  return core + String((10 - (sum % 10)) % 10);
+}
+function isbn10of(i13) {
+  if (i13.length !== 13) return "";
+  const core = i13.slice(3, 12);
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += Number(core[i]) * (10 - i);
+  const chk = (11 - (sum % 11)) % 11;
+  return core + (chk === 10 ? "X" : String(chk));
+}
+
+// Ordered candidates for one book: platform cover, then ISBN sources, then
+// (only when nothing else exists) a title search — Open Library first, Google
+// Books as a backup. Title searches are serialized (keyless APIs rate-limit
+// hard), de-duped per title, and cached in localStorage forever.
+let _titleQ = Promise.resolve();
+const _titleInflight = new Map();
+
+function titleSearch(title) {
+  const k = String(title || "").trim().toLowerCase().slice(0, 120);
+  if (!k) return Promise.resolve("");
+  try {
+    const cached = localStorage.getItem("folio.coverT:" + k);
+    if (cached) return Promise.resolve(cached === "-none-" ? "" : cached);
+  } catch (_) {}
+  if (_titleInflight.has(k)) return _titleInflight.get(k);
+
+  const job = _titleQ.then(async () => {
+    let url = "";
+    // Same-origin cached lookup first — never hammer keyless APIs from
+    // the visitor's own IP.
+    try {
+      const r = await fetch("/api/cover?q=" + encodeURIComponent(title.slice(0, 200)));
+      if (r.ok) {
+        const j = await r.json().catch(() => null);
+        if (j && j.ok && j.url) url = j.url;
+      }
+    } catch (_) {}
+    if (!url) {
+      // static-host fallback: Open Library directly (no key, generous limits)
+      try {
+        const r = await fetch("https://openlibrary.org/search.json?limit=1&fields=cover_i,title&q=" +
+          encodeURIComponent(title.slice(0, 140)));
+        const j = await r.json();
+        const cid = j && j.docs && j.docs[0] && j.docs[0].cover_i;
+        if (cid) url = "https://covers.openlibrary.org/b/id/" + cid + "-L.jpg";
+      } catch (_) {}
+    }
+    try { localStorage.setItem("folio.coverT:" + k, url || "-none-"); } catch (_) {}
+    // breathing room between lookups
+    await new Promise((res) => setTimeout(res, 250));
+    return url;
+  }).catch(() => "");
+
+  _titleQ = job;
+  const tracked = job.finally(() => _titleInflight.delete(k));
+  _titleInflight.set(k, tracked);
+  return tracked;
+}
+
+F.coversOf = async function coversOf(b) {
+  const list = [];
+  const push = (u) => { if (u && typeof u === "string" && !list.includes(u)) list.push(u); };
+  if (Array.isArray(b.covers)) b.covers.forEach(push);
+  push(b.cover);
+  if (b.cover && b.cover.startsWith("[")) {
+    try { JSON.parse(b.cover).forEach(push); } catch (_) {}
+  }
+  if (b.isbn) F.staticCovers(b.isbn).forEach(push);
+  if (!list.length && b.title) push(await titleSearch(b.title));
+  return list;
+};
+
+// <img> that walks the candidate list; falls back to the silhouette.
+F.coverEl = function coverEl(covers, phClass) {
+  const list = (covers || []).filter((u) => typeof u === "string" && u);
+  if (!list.length) return F.coverPh(phClass);
+  const img = document.createElement("img");
+  img.alt = "";
+  img.loading = "lazy";
+  let i = 0;
+  const next = () => {
+    i++;
+    if (i < list.length) img.src = list[i];
+    else img.replaceWith(F.coverPh(phClass));
+  };
+  img.addEventListener("error", next);
+  img.addEventListener("load", () => { if (img.naturalWidth < 10 || img.naturalHeight < 10) next(); });
+  img.src = list[0];
+  return img;
+};
+
+// Normalize a catalog/shelf record's cover field (URL, data URI or a JSON
+// list) plus ISBN sources into one candidate list.
+F.coversList = function coversList(b) {
+  const list = [];
+  const push = (u) => { if (u && typeof u === "string" && !list.includes(u)) list.push(u); };
+  if (Array.isArray(b.covers)) b.covers.forEach(push);
+  if (typeof b.cover === "string" && b.cover.startsWith("[")) {
+    try { JSON.parse(b.cover).forEach(push); } catch (_) {}
+  } else {
+    push(b.cover);
+  }
+  if (b.isbn) F.staticCovers(b.isbn).forEach(push);
+  return list;
+};
