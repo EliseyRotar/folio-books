@@ -28,12 +28,13 @@ CREATE TABLE IF NOT EXISTS catalog (
   author       TEXT NOT NULL DEFAULT '',
   isbn         TEXT NOT NULL DEFAULT '',
   platform     TEXT NOT NULL DEFAULT '',
-  cover        TEXT NOT NULL DEFAULT '',    -- data URI or https URL
+  cover        TEXT NOT NULL DEFAULT '',    -- https URL, data URI, or JSON array of URLs
   filename     TEXT NOT NULL DEFAULT '',
   pages        INTEGER NOT NULL DEFAULT 0,
   size         INTEGER NOT NULL DEFAULT 0,  -- PDF bytes
-  chunks       INTEGER NOT NULL DEFAULT 0,  -- rows in catalog_chunk
+  chunks       INTEGER NOT NULL DEFAULT 0,  -- rows in catalog_chunk / parts in R2
   has_pdf      INTEGER NOT NULL DEFAULT 0,  -- 0 = metadata only
+  storage      TEXT NOT NULL DEFAULT 'd1',  -- 'd1' chunks or 'r2' parts
   delete_key   TEXT NOT NULL DEFAULT '',    -- publisher's key, never listed
   published_at INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL

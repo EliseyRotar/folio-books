@@ -1,13 +1,15 @@
-// Folio — Pages Function: stream a published PDF out of D1 chunks.
+// Folio — Pages Function: serve a published PDF.
 //
-// The reader never gets the whole book in one response (Workers CPU/memory
-// limits). It asks for one chunk at a time and stitches them into a Blob in
-// the tab, which also lets it show a real progress bar.
+// Two storage shapes behind one protocol (the reader never learns which):
+//   * storage='d1' — base64 rows in catalog_chunk, one per response;
+//   * storage='r2' — raw parts at book/{id}/{idx} in the R2 bucket.
+// Either way the reader asks for one piece at a time and stitches them into
+// a Blob in the tab, which also lets it show a real progress bar.
 //
 //   GET ?id=book&page=info        -> { ok, size, chunks, pages, filename, title, platform }
-//   GET ?id=book&page=0           -> one chunk, application/octet-stream
+//   GET ?id=book&page=0           -> one piece, application/octet-stream
 //
-// Response headers on a chunk: x-folio-index, x-folio-chunks, x-folio-size,
+// Response headers on a piece: x-folio-index, x-folio-chunks, x-folio-size,
 // x-folio-filename — enough for the viewer to validate before assembling.
 
 export async function onRequestGet(context) {
@@ -22,7 +24,7 @@ export async function onRequestGet(context) {
 
   try {
     const meta = await db.prepare(
-      `SELECT id, title, filename, pages, size, chunks, has_pdf
+      `SELECT id, title, filename, pages, size, chunks, has_pdf, storage
          FROM catalog WHERE id = ?`
     ).bind(id).first();
 
@@ -48,6 +50,15 @@ export async function onRequestGet(context) {
       return json({ ok: false, error: "bad chunk index" }, 400);
     }
 
+    if (meta.storage === "r2" && context.env.BOOKS) {
+      const obj = await context.env.BOOKS.get("book/" + id + "/" + idx);
+      if (!obj) return json({ ok: false, error: "part missing" }, 404);
+      return new Response(obj.body, {
+        status: 200,
+        headers: pieceHeaders(idx, meta, obj.size)
+      });
+    }
+
     const row = await db.prepare(
       "SELECT data FROM catalog_chunk WHERE book_id = ? AND idx = ?"
     ).bind(id, idx).first();
@@ -58,19 +69,23 @@ export async function onRequestGet(context) {
 
     return new Response(bytes, {
       status: 200,
-      headers: {
-        "content-type": "application/octet-stream",
-        "content-length": String(bytes.byteLength),
-        "cache-control": "private, max-age=0",
-        "x-folio-index": String(idx),
-        "x-folio-chunks": String(meta.chunks || 0),
-        "x-folio-size": String(meta.size || 0),
-        "x-folio-filename": encodeURIComponent(meta.filename || "book.pdf")
-      }
+      headers: pieceHeaders(idx, meta, bytes.byteLength)
     });
   } catch (e) {
     return json({ ok: false, error: "pdf read failed: " + (e.message || e) }, 500);
   }
+}
+
+function pieceHeaders(idx, meta, len) {
+  return {
+    "content-type": "application/octet-stream",
+    "content-length": String(len),
+    "cache-control": "private, max-age=0",
+    "x-folio-index": String(idx),
+    "x-folio-chunks": String(meta.chunks || 0),
+    "x-folio-size": String(meta.size || 0),
+    "x-folio-filename": encodeURIComponent(meta.filename || "book.pdf")
+  };
 }
 
 function b64decode(s) {
