@@ -476,8 +476,17 @@
       it.cur = 0; it.tot = 0;
       paintRow(it);
       F.dim("Catalog: uploading " + filename + " (" + F.fmtBytes(bytes.byteLength) + ")…");
-      await Folio.publish.publishPdf(b, bytes, filename, pages || (b.meta && b.meta.count) || 0,
+      const upload = () => Folio.publish.publishPdf(b, bytes, filename, pages || (b.meta && b.meta.count) || 0,
         (c, t) => { it.cur = c; it.tot = t; paintRow(it); });
+      try {
+        await upload();
+      } catch (e) {
+        // a dropped connection mid-upload must not throw away the download
+        if (!/Failed to fetch|NetworkError|publish failed|\((408|425|429|5\d\d)\)/.test(e.message || "")) throw e;
+        F.err("upload interrupted (" + e.message + ") — retrying the upload in 15s…");
+        await new Promise((r) => setTimeout(r, 15000));
+        await upload();
+      }
 
       it.state = "done";
       F.ok("“" + b.title + "” stored in the catalog.");
@@ -485,7 +494,7 @@
     } catch (e) {
       // Transient relay/edge throttling — wait out the burst window and try
       // this book once more before giving up on it.
-      const transient = /relay HTTP (5\d\d|429)|upstream HTTP 5\d\d|relay is unreachable/.test(e.message);
+      const transient = /relay HTTP (5\d\d|429)|upstream HTTP 5\d\d|relay is unreachable|Failed to fetch|NetworkError/.test(e.message);
       if (transient && !it.retry) {
         it.retry = 1;
         F.err(e.message + " — waiting 20s, then retrying “" + b.title + "” once…");
