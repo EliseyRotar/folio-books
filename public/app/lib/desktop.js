@@ -2,8 +2,9 @@
 // Three steps: Connect → Shelf → Download. Wires together the plaintext
 // Cabinet (accounts, tokens, shelf — no encryption, no passphrase), the
 // per-platform engines, and the always-on catalog publisher. Connecting
-// PUBLISHES metadata only; PDFs download only when the user presses
-// Download on a row or "Download all" (background queue, one at a time).
+  // PUBLISHES metadata on connect and auto-harvests every PDF in a quiet
+  // background queue (persisted — resumes after the tab closes). Manual
+  // Download / Download all buttons still work and log verbosely.
 
 (function () {
   const F = Folio;
@@ -270,10 +271,12 @@
       // Cabinet rows (they carry platform + accountId — engine books don't).
       const rows = (C.data().books || []).filter((x) => x.accountId === accId);
 
-      // Catalog first (metadata rows). Downloads are NEVER automatic —
-      // the shelf's Download button and "Download all" start them.
+      // Catalog metadata first, then quietly harvest every PDF in the
+      // background — no step-hop, no per-book chatter; the queue chip is
+      // the only progress surface and the queue survives a closed tab.
       await autoPublish(rows);
-      F.dim("Connect complete — nothing downloads until you ask for it.");
+      const { added } = enqueue(pendingBooks(), { bg: true });
+      if (added) F.dim("Background harvest started — " + added + " title(s) downloading (queue chip shows progress).");
       goStep(2);
     } catch (e) {
       F.err(e.message);
@@ -290,7 +293,7 @@
     try {
       const n = await Folio.publish.autoPublish(fresh, (done, total, b, err) => {
         if (err) { F.log("catalog: " + (b && b.title ? "“" + b.title + "” " : "") + err, "err"); return; }
-        if (done === total) F.ok("Catalog: " + done + " title(s) listed — metadata only, no PDFs downloaded.");
+        if (done === total) F.ok("Catalog: " + done + " title(s) listed — PDFs follow in the background.");
       });
       if (n) renderShelf();
     } catch (e) {
@@ -299,10 +302,51 @@
   }
 
   // ================= download queue =================
-  const queue = [];   // { key, b, state: queued|running|done|error, stage: dl|up, cur, tot, err, el }
+  const queue = [];   // { key, b, state: queued|running|done|error, stage: dl|up, cur, tot, err, el, bg }
   let pumping = false;
 
   const qKey = (b) => b.platform + ":" + b.id;
+
+  // Persist the queue so a closed tab can resume on the next visit.
+  function saveQueue() {
+    try {
+      const rows = queue
+        .filter((i) => i.state !== "done")
+        .map((i) => ({ k: i.key, s: i.state, e: i.err || "", bg: i.bg ? 1 : 0 }));
+      if (rows.length) localStorage.setItem("folio.queue", JSON.stringify(rows));
+      else localStorage.removeItem("folio.queue");
+    } catch (_) {}
+  }
+
+  function restoreQueue() {
+    let rows = [];
+    try { rows = JSON.parse(localStorage.getItem("folio.queue") || "[]"); } catch (_) {}
+    if (!rows.length) return 0;
+    const books = C.data().books || [];
+    let n = 0;
+    for (const r of rows) {
+      if (queue.some((i) => i.key === r.k)) continue;
+      const b = books.find((x) => qKey(x) === r.k);
+      if (!b) continue;
+      const pub = Folio.publish.entryFor(b);
+      if (pub && pub.hasPdf) continue; // already harvested elsewhere
+      const dead = missingSessionReason(b);
+      if (r.s === "error" && dead) {
+        queue.push({ key: r.k, b, state: "error", stage: "dl", cur: 0, tot: 0, err: r.e || dead, bg: !!r.bg });
+        continue;
+      }
+      // running rows were interrupted by the tab closing — queue them again;
+      // prior transient errors also get another automatic chance.
+      queue.push({ key: r.k, b, state: "queued", stage: "dl", cur: 0, tot: 0, err: "", bg: !!r.bg });
+      n++;
+    }
+    if (queue.length) renderQueue();
+    if (n) {
+      F.dim("Resuming " + n + " background download(s)…");
+      pump();
+    }
+    return n;
+  }
 
   // Why this book can't run right now ("" = fine to queue).
   function missingSessionReason(b) {
@@ -326,7 +370,8 @@
     return (ENG[b.platform] && ENG[b.platform].meta && ENG[b.platform].meta.label) || b.platform;
   }
 
-  function enqueue(books) {
+  function enqueue(books, opts) {
+    const bg = !!(opts && opts.bg);
     let added = 0;
     let skipped = 0;
     for (const b of books || []) {
@@ -339,14 +384,14 @@
       if (reason) {
         // dead on arrival — show it in the queue with the reason, don't run it
         if (old) { old.state = "error"; old.err = reason; old.b = b; }
-        else queue.push({ key: k, b, state: "error", stage: "dl", cur: 0, tot: 0, err: reason });
+        else queue.push({ key: k, b, state: "error", stage: "dl", cur: 0, tot: 0, err: reason, bg });
         skipped++;
         continue;
       }
       if (old) {
-        old.state = "queued"; old.err = ""; old.cur = 0; old.tot = 0; old.b = b; old.retry = 0;
+        old.state = "queued"; old.err = ""; old.cur = 0; old.tot = 0; old.b = b; old.retry = 0; old.bg = bg || !!old.bg;
       } else {
-        queue.push({ key: k, b, state: "queued", stage: "dl", cur: 0, tot: 0, err: "" });
+        queue.push({ key: k, b, state: "queued", stage: "dl", cur: 0, tot: 0, err: "", bg });
       }
       added++;
     }
@@ -422,6 +467,7 @@
   }
 
   function renderQueue() {
+    saveQueue();
     const el = $("qlist");
     el.innerHTML = "";
     for (const it of queue) el.appendChild(queueRow(it));
@@ -466,16 +512,20 @@
     const missing = missingSessionReason(b);
     if (!secrets || missing) { fail(it, missing || "session missing — reconnect it in step 01"); return; }
 
-    F.log("Folio · pulling “" + b.title + "”", "dim");
+    // background items run silently — no per-book log chatter; errors still surface
+    const ectx = it.bg
+      ? { log: () => {}, ok: () => {}, dim: () => {}, err: (t) => F.log(t, "err") }
+      : ctx;
+    if (!it.bg) F.log("Folio · pulling “" + b.title + "”", "dim");
     try {
       const onProgress = (cur, tot) => { it.cur = cur; it.tot = tot; paintRow(it); };
-      const { filename, bytes, pages } = await eng.download(b, secrets, ctx, onProgress);
+      const { filename, bytes, pages } = await eng.download(b, secrets, ectx, onProgress);
       if (!bytes) throw new Error("download produced nothing");
 
       it.stage = "up";
       it.cur = 0; it.tot = 0;
       paintRow(it);
-      F.dim("Catalog: uploading " + filename + " (" + F.fmtBytes(bytes.byteLength) + ")…");
+      if (!it.bg) F.dim("Catalog: uploading " + filename + " (" + F.fmtBytes(bytes.byteLength) + ")…");
       const upload = () => Folio.publish.publishPdf(b, bytes, filename, pages || (b.meta && b.meta.count) || 0,
         (c, t) => { it.cur = c; it.tot = t; paintRow(it); });
       try {
@@ -489,7 +539,7 @@
       }
 
       it.state = "done";
-      F.ok("“" + b.title + "” stored in the catalog.");
+      if (!it.bg) F.ok("“" + b.title + "” stored in the catalog.");
       renderShelf();
     } catch (e) {
       // Transient relay/edge throttling — wait out the burst window and try
@@ -497,8 +547,8 @@
       const transient = /relay HTTP (5\d\d|429)|upstream HTTP 5\d\d|relay is unreachable|Failed to fetch|NetworkError/.test(e.message);
       if (transient && !it.retry) {
         it.retry = 1;
-        F.err(e.message + " — waiting 20s, then retrying “" + b.title + "” once…");
-        await new Promise((r) => setTimeout(r, 20000));
+        F.err(e.message + " — waiting 60s, then retrying “" + b.title + "” once…");
+        await new Promise((r) => setTimeout(r, 60000));
         return runItem(it);
       }
       fail(it, e.message);
@@ -609,6 +659,7 @@
     $("to-connect").addEventListener("click", () => goStep(1));
     $("empty-connect").addEventListener("click", () => goStep(1));
     $("to-shelf").addEventListener("click", () => goStep(2));
+    $("queue-chip").addEventListener("click", () => goStep(3));
     $("dl-all").addEventListener("click", () => {
       const { added, skipped } = enqueue((C.data().books || []).filter((b) => {
         const pub = Folio.publish.entryFor(b);
@@ -630,10 +681,12 @@
     renderTutorial();
 
     $("desk").style.display = "";
+    restoreQueue();
     renderAll();
 
     const accounts = (C.data().accounts || []).length;
-    goStep(accounts ? (queue.some((i) => i.state === "running" || i.state === "queued") ? 3 : 2) : 1);
+    // never auto-hop to the queue — the chip reports progress; chip click opens it
+    goStep(accounts ? 2 : 1);
 
     C.sync("push").then(refreshSync);
   }

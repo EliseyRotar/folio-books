@@ -352,6 +352,8 @@ img { max-width: 100%; }
 .chip.green { color: var(--green); background: var(--green-soft); border-color: color-mix(in srgb, var(--green) 32%, transparent); }
 .chip.blue  { color: var(--accent-hi); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
 .chip.ink   { color: var(--text-3); }
+#queue-chip { cursor: pointer; }
+#queue-chip:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent-hi); }
 
 .badge {
   display: inline-flex;

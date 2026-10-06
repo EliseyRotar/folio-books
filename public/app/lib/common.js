@@ -36,20 +36,22 @@ F.api = async function api(url, opts = {}, { viaProxy } = {}) {
   return relay(url, opts);
 };
 
-// Global burst cooldown: Cloudflare's edge answers clusters of 503 that
-// last a few seconds. After a 5xx every relay call waits this out first so
-// queued calls don't hammer the edge while it is tripping.
+// Global burst pause: Cloudflare's edge answers clusters of 503 that can
+// last minutes. Each throttle failure extends one shared pause (8s up to
+// 3 min); every relay call waits it out first and then probes, so a single
+// burst window doesn't sink every queued book. Any real answer resets it.
 let relayFails = 0;
-let relayCoolUntil = 0;
+let relayPauseUntil = 0;
 
 async function relay(url, opts) {
-  // Retry 429/5xx/network failures with a growing backoff (up to ~30s of
-  // riding out a burst window); 4xx answers are permanent — surface them.
-  const delays = [800, 2000, 5000, 9000, 13000];
+  // Retry 429/5xx/network failures; the growing global pause does the
+  // window-riding, the per-call delays just space the probes. 4xx answers
+  // are permanent — surface them immediately.
+  const delays = [800, 2000, 4000, 7000];
   let lastErr;
   for (let attempt = 0; ; attempt++) {
     if (attempt) await new Promise((r) => setTimeout(r, delays[Math.min(attempt - 1, delays.length - 1)] + Math.random() * 500));
-    if (Date.now() < relayCoolUntil) await new Promise((r) => setTimeout(r, relayCoolUntil - Date.now()));
+    if (Date.now() < relayPauseUntil) await new Promise((r) => setTimeout(r, relayPauseUntil - Date.now()));
     let res;
     try {
       res = await fetch(F.PROXY_HOST, {
@@ -68,14 +70,14 @@ async function relay(url, opts) {
       continue;
     }
     if (res.status === 429 || res.status >= 500) {
-      lastErr = new Error("relay HTTP " + res.status + " — throttled for a moment, retry shortly");
-      relayFails = Math.min(relayFails + 1, 5);
-      relayCoolUntil = Date.now() + Math.min(15000, 1000 * (1 << relayFails));
+      lastErr = new Error("relay HTTP " + res.status + " — throttled, riding it out");
+      relayFails = Math.min(relayFails + 1, 6);
+      relayPauseUntil = Date.now() + Math.min(180000, 8000 * Math.pow(2, relayFails - 1));
       if (attempt >= delays.length) throw lastErr;
       continue;
     }
     relayFails = 0;
-    relayCoolUntil = 0;
+    relayPauseUntil = 0;
     if (!res.ok) throw new Error("relay HTTP " + res.status);
     const j = await res.json();
     if (!j.ok) throw new Error(j.error || "relay error " + j.status);
