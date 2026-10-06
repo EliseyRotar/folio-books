@@ -1,57 +1,140 @@
-<!doctype html>
-<html lang="it">
+<!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catalogo — libri pubblicati</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 900px; padding: 16px; }
-  h1 { font-size: 22px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; vertical-align: top; }
-  img.cover { width: 48px; height: 64px; object-fit: cover; background: #eee; border-radius: 4px; }
-  a.pdf { color: #06c; }
-  .muted { color: #777; font-size: 12px; }
-  #empty { margin-top: 24px; color: #888; }
-</style>
+<script>try{var t=localStorage.getItem("folio.theme")||(window.matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+<title>Catalog — Folio · every unlocked book, ready to read</title>
+<meta name="description" content="The public Folio catalog: schoolbooks unlocked by the community, published anonymously with covers, and readable in the browser as full PDFs. No accounts, no credentials, no tracking.">
+<meta name="keywords" content="schoolbook catalog, textbook pdf, read textbook online, folio catalog">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Catalog — Folio">
+<meta property="og:description" content="Every unlocked book, published anonymously — cover, title, and the full PDF right in your browser.">
+<meta name="twitter:card" content="summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/folio.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%231c1f1d'/%3E%3Ctext x='16' y='22' font-family='Georgia' font-style='italic' font-size='20' fill='%23f6f1e6' text-anchor='middle'%3EF%3C/text%3E%3C/svg%3E">
 </head>
 <body>
-<h1>Catalogo pubblico</h1>
-<p class="muted">Ogni libro sbloccato viene pubblicato qui. Solo metadati e copertina: nessuna credenziale, nessun account.</p>
-<div id="empty" hidden>Nessun libro pubblicato. Aggiungi e sblocca un libro dall'armadietto per vederlo apparire qui.</div>
-<table id="tbl" hidden>
-  <thead><tr><th></th><th>Titolo</th><th>Autore</th><th>ISBN</th><th>Piattaforma</th><th>PDF</th></tr></thead>
-  <tbody id="rows"></tbody>
-</table>
+
+<header class="masthead">
+  <div class="masto-inner">
+    <a class="brand" href="../index.html" aria-label="Folio home">
+      <span class="brand-word">Folio<em>.</em></span>
+      <span class="brand-sub">the public shelf</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <ul class="nav-links">
+        <li><a href="../index.html"><span class="idx">I</span> Index</a></li>
+        <li><a href="../platforms.html"><span class="idx">II</span> Platforms</a></li>
+        <li><a href="index.html"><span class="idx">III</span> Reader</a></li>
+        <li><a href="catalog.html"><span class="idx">IV</span> Catalog</a></li>
+        <li><a href="../tokens.html"><span class="idx">V</span> Keys</a></li>
+      </ul>
+    </nav>
+      <button type="button" class="theme-btn" data-theme-toggle aria-label="Switch colour theme">Light</button>
+  </div>
+</header>
+
+<main class="page">
+
+  <section class="hero">
+    <p class="eyebrow">Catalog · sommario pubblico</p>
+    <h1>Books people <span class="rusty">unlocked,</span> left on the table.</h1>
+    <p class="lede">Every title anyone pulls out of their Cabinet is shelved here anonymously — cover, title, author, and the full PDF you can read right in this tab. No accounts, no credentials, nothing that points back at the person who unlocked it.</p>
+    <div class="cat-tools">
+      <input class="search" id="q" type="search" placeholder="Search title, author, ISBN or platform…" autocomplete="off" spellcheck="false">
+      <span class="cat-count" id="count">loading…</span>
+    </div>
+  </section>
+
+  <section class="section" style="border-bottom:0">
+    <div class="cat-grid" id="grid" aria-live="polite"></div>
+    <div class="cat-empty" id="empty" hidden>
+      <p><b>The shelf is empty.</b></p>
+      <p class="small muted">Connect a platform in the <a href="index.html">Reader</a> — every book you unlock publishes itself here as soon as it lands.</p>
+    </div>
+    <p class="small muted mt-2" id="failed" hidden>Couldn’t reach <code>/api/public</code>. Deploy this on Cloudflare Pages with D1 bound and the catalog fills itself.</p>
+  </section>
+
+</main>
+
+<footer class="colophon">
+  <div class="page colophon-inner">
+    <div class="mono">Folio<em>.</em> — your schoolbooks, in one place</div>
+    <div class="mono">Metadata only · no credentials ever leave a Cabinet</div>
+    <div class="mono"><a href="index.html">Open the Reader →</a></div>
+  </div>
+</footer>
+
+<script src="../assets/js/site.js"></script>
+<script src="lib/common.js"></script>
 <script>
-  (async () => {
-    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-    let doc;
-    try {
-      const r = await fetch("/api/public");
-      if (!r.ok) throw new Error("http " + r.status);
-      const payload = await r.json();
-      doc = { books: payload.books || [] };
-    } catch (_) { doc = {}; }
-    const books = (doc && doc.books) || [];
-    if (!books.length) { document.getElementById("empty").hidden = false; return; }
-    document.getElementById("tbl").hidden = false;
-    const rows = document.getElementById("rows");
-    for (const b of books) {
-      const author = b.author || "";
-      const pdf = b.id ? ("/api/proxy?platform=" + encodeURIComponent(b.platform || "") + "&id=" + encodeURIComponent(b.id) + "&mode=pdf") : "";
-      const tr = document.createElement("tr");
-      tr.innerHTML =
-        "<td>" + (b.cover ? '<img class="cover" src="' + esc(b.cover) + '" alt="">' : "") + "</td>" +
-        "<td><strong>" + esc(b.title) + "</strong></td>" +
-        "<td>" + esc(author) + "</td>" +
-        "<td class=\"muted\">" + esc(b.isbn || "") + "</td>" +
-        "<td>" + esc(b.platform || "") + "</td>" +
-        "<td>" + (pdf ? '<a class="pdf" href="' + esc(pdf) + '" target="_blank" rel="noopener">PDF</a>' : "") + "</td>";
-      rows.appendChild(tr);
+(async function () {
+  const F = Folio;
+  const grid = document.getElementById("grid");
+  const empty = document.getElementById("empty");
+  const failed = document.getElementById("failed");
+  const count = document.getElementById("count");
+  const q = document.getElementById("q");
+
+  let books = [];
+  try {
+    const r = await fetch("/api/public");
+    if (!r.ok) throw new Error("http " + r.status);
+    const j = await r.json();
+    books = (j && j.books) || [];
+  } catch (e) {
+    failed.hidden = false;
+    count.textContent = "offline";
+    return;
+  }
+
+  function initials(t) {
+    const w = String(t || "").trim().split(/\s+/).filter(Boolean).slice(0, 2);
+    return w.map((x) => x[0]).join("").toUpperCase() || "?";
+  }
+
+  function card(b) {
+    const a = document.createElement("a");
+    a.className = "cat-card";
+    a.href = "read.html?id=" + encodeURIComponent(b.id);
+    const cover = b.cover
+      ? `<div class="cat-cover"><img src="${F.esc(b.cover)}" alt="" loading="lazy"></div>`
+      : `<div class="cat-cover" aria-hidden="true">${F.esc(initials(b.title))}</div>`;
+    const who = [b.author, b.platform].filter(Boolean).map(F.esc).join(" · ") || (b.isbn ? "ISBN " + F.esc(b.isbn) : "");
+    const state = b.hasPdf
+      ? `<div class="st pinned">${b.pages ? b.pages + " pages · " : ""}${F.fmtBytes(b.size || 0)}</div>`
+      : `<div class="st">metadata only</div>`;
+    a.innerHTML =
+      cover +
+      `<h3>${F.esc(b.title || "Untitled")}</h3>` +
+      (who ? `<div class="who">${who}</div>` : "") +
+      state;
+    a.dataset.hay = ((b.title || "") + " " + (b.author || "") + " " + (b.isbn || "") + " " + (b.platform || "")).toLowerCase();
+    return a;
+  }
+
+  function render() {
+    const needle = q.value.trim().toLowerCase();
+    grid.innerHTML = "";
+    const shown = needle
+      ? books.filter((b) => ((b.title || "") + " " + (b.author || "") + " " + (b.isbn || "") + " " + (b.platform || "")).toLowerCase().indexOf(needle) >= 0)
+      : books;
+    for (const b of shown) grid.appendChild(card(b));
+    count.textContent = shown.length + (shown.length === 1 ? " book" : " books");
+    empty.hidden = books.length > 0;
+    if (books.length && !shown.length) {
+      empty.hidden = false;
+      empty.innerHTML = '<p><b>No match.</b></p><p class="small muted">Try a different word — titles, authors and ISBNs all search.</p>';
     }
-  })();
+  }
+
+  q.addEventListener("input", render);
+  render();
+})();
 </script>
 </body>
 </html>
