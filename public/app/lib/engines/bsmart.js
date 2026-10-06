@@ -1,11 +1,25 @@
 // Folio engine — bSmart (EdAtlas / Deascuola / DigiBook24 / Pearson Italia).
-// Auth: session cookie (_bsw_session_v1_production). The API doesn't send
-// CORS headers, so calls go through the Folio relay. Page files are AES-
-// CBC plaintext with a key hidden in the site's own JavaScript bundle;
-// Folio extracts it and decrypts in-browser.
 //
-// Status: beta. Connect & shelf sync work today; page download is built
-// but tuned against the live backend when a real account is available.
+// Ported 1:1 from tools/bSmart-downloader (the vendored, working CLI):
+//
+//   1. `_bsw_session_v1_production` cookie  ->  GET /api/v5/user
+//      that response carries `auth_token`;
+//   2. EVERY later call uses the `auth_token` header — not the cookie
+//      (the cookie is only ever sent to /api/v5/user);
+//   3. shelf  = /api/v6/books?page_thumb_size=medium&per_page=25000
+//              + /api/v5/books/preactivations (merged, de-duped by id);
+//   4. before downloading, the FRESH book info is fetched from
+//      /api/v6/books/by_book_id/{id} — its current_edition.revision is the
+//      one used in the resources URL (never trust the shelf's stale copy);
+//   5. resources are paged, then `info.map(e => e.assets).flat()` and
+//      filtered on `use == "page_pdf"` (NOT on `r.type`);
+//   6. an asset is decrypted when `asset.encrypted !== false` — i.e. anything
+//      except an explicit false means encrypted, exactly like the CLI;
+//   7. the AES key is pulled out of the my.bsmart.it JS bundle;
+//   8. each single-page PDF is copied into one output PDF.
+//
+// Everything runs in this tab. The cookie never leaves your device: it is
+// only forwarded through the Folio relay straight to bSmart's own API.
 
 Folio.engines = Folio.engines || {};
 
@@ -18,82 +32,158 @@ Folio.engines.bsmart = {
     status: "beta",
     connectable: true,
     needsRelay: true,
-    desc: "Cookie-based. Your shelf syncs in-browser; page download is in active tuning."
+    desc: "Cookie-based: paste one session cookie, your shelf syncs, every page merges to a single PDF in this tab.",
+    tutorial: [
+      "Open <b>my.bsmart.it</b> (or your school’s own bSmart site) and log in as usual.",
+      "Press <b>F12</b> → <b>Application</b> (Chrome/Edge) or <b>Storage</b> (Firefox) → <b>Cookies</b> → <code>my.bsmart.it</code>.",
+      "Find the cookie <code>_bsw_session_v1_production</code>, double-click its <b>Value</b> and copy it.",
+      "Paste it below. Leave the site selector on <b>bsmart.it</b> unless your school uses DigiBook24.",
+      "Press <b>Connect</b> — your shelf appears, and <b>Download</b> rebuilds any book as one PDF right here."
+    ]
   },
   creds: [
-    { k: "base", type: "text", label: "Base site", placeholder: "my.bsmart.it" },
-    { k: "cookie", type: "password", label: "Session cookie", hint: "Application → Cookies → my.bsmart.it → _bsw_session_v1_production" }
+    {
+      k: "site", type: "select", label: "Site",
+      options: { bsmart: "bsmart.it (www.bsmart.it)", digibook24: "DigiBook24 (web.digibook24.com)", custom: "Custom base domain" },
+      hint: "Picked automatically for most schools. Choose Custom only if your school runs its own domain."
+    },
+    { k: "base", type: "text", label: "Custom base domain", placeholder: "school.bsmart.it", depends: "custom", hint: "Used only when Site = Custom base domain." },
+    { k: "cookie", type: "password", label: "Session cookie (_bsw_session_v1_production)", hint: "Follow the tutorial above — five steps, no extensions." }
   ],
 
-  baseOf(s) { return ((s.base || "").trim() || "my.bsmart.it").replace(/^https?:\/\//, ""); },
+  // per-cookie auth_token cache (in memory only, never saved to the Cabinet)
+  _tokens: {},
 
-  headers(s) {
-    return { Cookie: "_bsw_session_v1_production=" + (s.cookie || "").trim() };
+  baseOf(s) {
+    const custom = (s.base || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    if (s.site === "custom" && custom) return custom;
+    if (s.site === "digibook24") return "web.digibook24.com";
+    return custom || "www.bsmart.it";
+  },
+
+  _cookieHeaders(s) {
+    const v = (s.cookie || "").trim();
+    if (!v) throw new Error("Missing session cookie — follow the bSmart tutorial above.");
+    return { cookie: "_bsw_session_v1_production=" + v };
+  },
+
+  // step 1: cookie -> auth_token (cached; re-run on 401)
+  async _auth(s) {
+    const cacheKey = (s.cookie || "").trim();
+    if (this._tokens[cacheKey]) return this._tokens[cacheKey];
+    const base = this.baseOf(s);
+    const res = await Folio.api("https://" + base + "/api/v5/user", { headers: this._cookieHeaders(s) }, { viaProxy: true });
+    if (res.status !== 200) throw new Error("Cookie rejected (HTTP " + res.status + ") — grab a fresh _bsw_session_v1_production value and try again.");
+    const me = await res.json().catch(() => null);
+    if (!me || !me.auth_token) throw new Error("Cookie rejected — that value doesn’t look like a bSmart session.");
+    this._tokens[cacheKey] = me.auth_token;
+    return me.auth_token;
+  },
+
+  _headers(s) {
+    const cacheKey = (s.cookie || "").trim();
+    return { auth_token: this._tokens[cacheKey] || "" };
+  },
+
+  // step 2..n: everything with auth_token, one transparent refresh on 401
+  async _req(url, s, retried) {
+    let headers = this._headers(s);
+    if (!headers.auth_token) await this._auth(s);
+    headers = this._headers(s);
+    const res = await Folio.api(url, { headers }, { viaProxy: true });
+    if ((res.status === 401 || res.status === 403) && !retried) {
+      delete this._tokens[(s.cookie || "").trim()];
+      await this._auth(s);
+      return this._req(url, s, true);
+    }
+    if (res.status !== 200) throw new Error("bSmart API " + res.status + " for " + shortUrl(url));
+    return res;
   },
 
   async connect(secrets, ctx) {
-    const base = this.baseOf(secrets);
-    const h = this.headers(secrets);
+    const s = Object.assign({}, secrets, { site: secrets.site || "bsmart" });
+    const base = this.baseOf(s);
 
     ctx.log("→ " + base + "/api/v5/user");
-    const userRes = await Folio.api("https://" + base + "/api/v5/user", { headers: h }, { viaProxy: true });
-    if (userRes.status !== 200) throw new Error("cookie rejected — grab a fresh one from the reader.");
-    const me = await userRes.json();
-    if (!me.id) throw new Error("cookie rejected — that value doesn't look like a session.");
+    await this._auth(s);
 
     ctx.log("→ " + base + "/api/v6/books");
-    let books = await (await Folio.api("https://" + base + "/api/v6/books?page_thumb_size=medium&per_page=25000", { headers: h }, { viaProxy: true })).json();
+    const books = await (await this._req("https://" + base + "/api/v6/books?page_thumb_size=medium&per_page=25000", s)).json();
+
+    // preactivations: school-provided titles that don't live in the library yet
+    let pre = [];
     try {
-      const pre = await (await Folio.api("https://" + base + "/api/v5/books/preactivations", { headers: h }, { viaProxy: true })).json();
-      const seen = new Set(books.map((b) => b.id));
-      for (const pre of (pre || [])) {
-        if (pre.no_bsmart === false) {
-          for (const b of (pre.books || [])) if (!seen.has(b.id)) { seen.add(b.id); books.push(b); }
+      pre = await (await this._req("https://" + base + "/api/v5/books/preactivations", s)).json();
+    } catch (_) { /* optional endpoint */ }
+
+    const seen = new Set();
+    const all = [];
+    for (const b of (books || [])) {
+      if (seen.has(b.id)) continue;
+      seen.add(b.id);
+      all.push(b);
+    }
+    for (const p of (pre || [])) {
+      if (p && p.no_bsmart === false) {
+        for (const b of (p.books || [])) {
+          if (!b || seen.has(b.id)) continue;
+          seen.add(b.id);
+          all.push(b);
         }
       }
-    } catch (_) { /* preactivations are optional */ }
+    }
 
-    const list = books.map((b) => ({
+    const list = all.map((b) => ({
       id: String(b.id),
       title: b.title || b.name || "Untitled",
-      cover: b.cover || b.thumb || "",
-      meta: { revision: b.current_edition && (b.current_edition.revision || b.current_edition.id) }
+      cover: b.cover || b.thumb || b.image || "",
+      isbn: b.isbn || b.ean || "",
+      meta: {
+        author: b.author || (b.authors && b.authors[0]) || "",
+        revision: b.current_edition && (b.current_edition.revision || b.current_edition.id)
+      }
     }));
 
     ctx.ok("Shelf loaded — " + list.length + " book(s).");
     return {
-      account: { auth: "cookie", label: base, sub: "bsmart" },
-      secrets: { base, cookie: (secrets.cookie || "").trim() },
+      account: { auth: "cookie", label: base, sub: all.length + " titles" },
+      secrets: { site: s.site, base: s.site === "custom" ? base : "", cookie: (secrets.cookie || "").trim() },
       books: list
     };
   },
 
-  async _resources(b, s) {
-    const h = this.headers(s);
-    const base = this.baseOf(s);
-    const all = [];
-    let page = 1;
-    for (;;) {
-      const url = "https://" + base + "/api/v5/books/" + b.id + "/" + (b.meta.revision || "1") + "/resources?per_page=500&page=" + page;
-      let temp;
-      try {
-        temp = await (await Folio.api(url, { headers: h }, { viaProxy: true })).json();
-      } catch (_) { break; }
-      all.push(...(temp || []));
-      if ((temp || []).length < 500) break;
-      page++;
-    }
-    return all;
+  // fresh book info -> the revision the resources endpoint actually wants
+  async _bookInfo(b, s) {
+    const info = await (await this._req("https://" + this.baseOf(s) + "/api/v6/books/by_book_id/" + encodeURIComponent(b.id), s)).json().catch(() => null);
+    if (!info || !info.current_edition) throw new Error("bSmart doesn’t know this book id — reconnect to resync your shelf.");
+    return info;
   },
 
+  // paged resources -> flatten every group's assets -> page PDFs only
+  async _pageAssets(info, s) {
+    const base = this.baseOf(s);
+    const rev = info.current_edition.revision || info.current_edition.id;
+    const groups = [];
+    for (let page = 1; ; page++) {
+      const part = await (await this._req(
+        "https://" + base + "/api/v5/books/" + encodeURIComponent(info.id) + "/" + encodeURIComponent(rev) +
+        "/resources?per_page=500&page=" + page, s)).json().catch(() => null);
+      if (!Array.isArray(part)) break;
+      groups.push(...part);
+      if (part.length < 500) break;
+    }
+    const assets = groups.map((g) => (g && g.assets) || []).flat().filter(Boolean);
+    return assets.filter((a) => a.use === "page_pdf" && a.url);
+  },
+
+  // AES key hidden in the my.bsmart.it bundle (same page the CLI uses)
   async _bundleKey() {
-    const h = { "User-Agent": "Mozilla/5.0" };
-    const page = await (await Folio.api("https://my.bsmart.it/", { headers: h }, { viaProxy: true })).text();
+    const page = await (await Folio.api("https://my.bsmart.it/", { headers: { "user-agent": "Mozilla/5.0" } }, { viaProxy: true })).text();
     const scripts = [...page.matchAll(/<script[^>]+src="([^"]+\.js[^"]*)"[^>]*>/g)]
-      .map((m) => m[1])
-      .filter((src) => src.startsWith("/"));
+      .map((m) => m[1]).filter((src) => src.startsWith("/"));
+    if (!scripts.length) throw new Error("bSmart bundle not found on my.bsmart.it — the site may have changed.");
     for (const src of scripts) {
-      const text = await (await Folio.api("https://my.bsmart.it" + src, { headers: h }, { viaProxy: true })).text();
+      const text = await (await Folio.api("https://my.bsmart.it" + src, { headers: { "user-agent": "Mozilla/5.0" } }, { viaProxy: true })).text();
       const m = text.match(/var\s+([A-Za-z_$][\w$]*)=String\.fromCharCode\(([^)]*)\),([A-Za-z_$][\w$]*)=["']constructor["'];\3\[\3\]\[\3\]\((.*?)\)\(\)/s);
       if (!m) continue;
       const [, charVar, charCodes, , expression] = m;
@@ -103,22 +193,21 @@ Folio.engines.bsmart = {
       const keyM = snippet.match(/['"]((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)['"]/);
       if (keyM) return Folio.b64ToBytes(keyM[1]);
     }
-    throw new Error("Could not extract the bSmart key from the current bundle.");
+    throw new Error("Could not extract the bSmart encryption key from the current bundle.");
   },
 
-  // decrypt one bSmart page file: msgpack header → AES-CBC(256..start) with
-  // 16-byte IV prefix, PKCS#7 unpad, then rest appended verbatim.
+  // msgpack header -> AES-CBC(256..start), 16-byte IV prefix, PKCS#7 unpad,
+  // rest appended verbatim — identical to tools/bSmart-downloader/src/crypto.js
   async _decrypt(file, key) {
     try {
       const header = Folio.msgpack.decode(file, 0).v;
       const start = Number(header.start);
-      if (!(start > 256 && start <= file.length)) throw new Error("bad start");
+      if (!(start > 256 && start <= file.length)) throw new Error("bad msgpack header");
       const first = file.slice(256, start);
       const iv = first.slice(0, 16);
       const ct = first.slice(16);
       const k = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["decrypt"]);
       const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-CBC", iv }, k, ct));
-      // PKCS#7 unpad
       const pad = pt[pt.length - 1];
       const un = (pad > 0 && pad <= 16 && pt.slice(pt.length - pad).every((x) => x === pad))
         ? pt.slice(0, pt.length - pad)
@@ -133,43 +222,63 @@ Folio.engines.bsmart = {
   },
 
   async download(book, s, ctx, onProgress) {
-    const h = this.headers(s);
     const base = this.baseOf(s);
-    ctx.log("→ resources for " + book.title);
-    const resources = await this._resources(book, s);
-    const pages = resources.filter((r) => r && (r.type === "page" || r.type === "pdf") && r.url);
-    if (!pages.length) {
-      // fall back to any url that parses as a page asset
-      pages.push(...resources.filter((r) => r && r.url && /\.pdf(\?|$)/i.test(r.url)));
+
+    ctx.log("→ book info (fresh revision)");
+    const info = await this._bookInfo(book, s);
+
+    ctx.log("→ page assets");
+    const assets = await this._pageAssets(info, s);
+    if (!assets.length) throw new Error("No page PDFs in this book — it may still be activating on bSmart.");
+
+    // only pay for the key if at least one page is encrypted
+    const needsKey = assets.some((a) => a.encrypted !== false);
+    let key = null;
+    if (needsKey) {
+      ctx.log("→ extracting the bSmart key from the site bundle…");
+      key = await this._bundleKey();
+      ctx.ok("Key ready.");
     }
-    if (!pages.length) throw new Error("No page assets found for this book.");
 
-    ctx.log("Extracting the bSmart key from the site bundle…");
-    const key = await this._bundleKey();
-    ctx.ok("Key ready.");
-
-    const parts = [];
     await Folio.ensure({ pdflib: true });
-    for (let i = 0; i < pages.length; i++) {
-      const r = pages[i];
-      let url = r.url;
-      if (!/^https?:\/\//.test(url)) url = "https://" + base + url;
-      ctx.dim("page " + (i + 1) + "/" + pages.length);
-      const res = await Folio.api(url, { headers: h }, { viaProxy: true });
-      const file = new Uint8Array(await res.arrayBuffer());
-      // bSmart pages are msgpack-wrapped plaintext files; unplaintext
-      // assets (covers, extras) start with %PDF.
-      if (file.length > 4 && file[0] === 0x81 && file[1] !== 0x50) {
-        parts.push({ bytes: await this._decrypt(file, key), label: r.id || i });
-      } else {
-        parts.push({ bytes: file, label: r.id || i });
+    const parts = [];
+    for (let i = 0; i < assets.length; i++) {
+      const a = assets[i];
+      const url = /^https?:\/\//.test(a.url) ? a.url : "https://" + base + a.url;
+      if (onProgress) onProgress(i, assets.length);
+      let res;
+      try {
+        // assets are fetched with no auth headers — same as the CLI
+        res = await Folio.api(url, {}, { viaProxy: true });
+      } catch (e) {
+        const host = safeHost(url);
+        throw new Error(
+          /not allowed/i.test(e.message || "")
+            ? "Asset host “" + host + "” isn’t in the relay allowlist yet — add it to functions/api/proxy.js."
+            : "Could not fetch page " + (i + 1) + " of " + assets.length + ": " + (e.message || e)
+        );
       }
-      if (onProgress) onProgress(i + 1, pages.length);
+      if (res.status !== 200) throw new Error("Page " + (i + 1) + "/" + assets.length + " returned HTTP " + res.status);
+      let file = new Uint8Array(await res.arrayBuffer());
+      if (a.encrypted !== false) {
+        if (!key) throw new Error("This page is encrypted but no key was extracted.");
+        file = await this._decrypt(file, key);
+      }
+      parts.push({ bytes: file, label: String(a.filename || a.id || i) });
     }
+    if (onProgress) onProgress(assets.length, assets.length);
 
     ctx.log("Merging " + parts.length + " page PDF(s)…");
-    const { bytes, pages: pageCount } = await Folio.pdf.merge(parts, { chunk: 60, onProgress });
-    ctx.ok("Assembly complete — " + pageCount + " page(s), " + Folio.fmtBytes(bytes.byteLength));
-    return { filename: Folio.sanitizeName(book.title) + ".pdf", bytes };
+    const { bytes, pages } = await Folio.pdf.merge(parts, { chunk: 40 });
+    const title = info.title || book.title || "bSmart book";
+    ctx.ok("Assembly complete — " + pages + " page(s), " + Folio.fmtBytes(bytes.byteLength));
+    return { filename: Folio.sanitizeName(title) + ".pdf", bytes, pages };
   }
 };
+
+function shortUrl(u) {
+  try { const x = new URL(u); return x.hostname + x.pathname; } catch (_) { return u; }
+}
+function safeHost(u) {
+  try { return new URL(u).hostname; } catch (_) { return "unknown"; }
+}
