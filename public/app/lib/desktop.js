@@ -82,18 +82,43 @@
   }
 
   // ----- shelf -------------------------------------------------------
+  function coverTag(b) {
+    if (b.cover) {
+      return `<img src="${F.esc(b.cover)}" alt="" loading="lazy">`;
+    }
+    return `<div class="cover-ph" aria-hidden="true">${F.esc(initials(b.title))}</div>`;
+  }
+
+  function swapCover(img, b) {
+    const ph = document.createElement("div");
+    ph.className = "cover-ph";
+    ph.setAttribute("aria-hidden", "true");
+    ph.textContent = initials(b.title);
+    img.replaceWith(ph);
+  }
+
+  function initials(t) {
+    const w = String(t || "").trim().split(/\s+/).filter(Boolean).slice(0, 2);
+    return w.map((x) => x[0]).join("").toUpperCase() || "?";
+  }
+
   function bookRow(b) {
     const eng = ENG[b.platform];
+    const pub = Folio.publish && Folio.publish.entryFor(b);
     const el = document.createElement("div");
     el.className = "bookrow shelf-row";
     el.innerHTML =
-      `<img src="${F.esc(b.cover)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` +
+      coverTag(b) +
       `<div class="meta"><h4>${F.esc(b.title)}</h4>` +
       `<div class="isbn">${eng ? eng.meta.label : b.platform}${b.isbn ? " · " + F.esc(b.isbn) : ""}</div>` +
-      `<div class="post">${b.meta && b.meta.count ? b.meta.count + " pages" : "in-browser"}</div></div>` +
+      `<div class="post">${b.meta && b.meta.count ? b.meta.count + " pages" : "in-browser"}` +
+      (pub ? ` · <a href="read.html?id=${encodeURIComponent(pub.id)}" target="_blank" rel="noopener">in catalog</a>` : "") +
+      `</div></div>` +
       `<div class="book-actions"><button class="btn btn-sm btn-primary" data-dl="${b.id}" data-platform="${b.platform}">Download</button>` +
       `<button class="btn btn-sm data-rmbk" data-rm="${b.id}">Remove</button></div>`;
     el.querySelector("[data-dl]").addEventListener("click", () => doDownload(b));
+    const img = el.querySelector("img");
+    if (img) img.addEventListener("error", () => swapCover(img, b));
     el.querySelector("[data-rm]").addEventListener("click", () => {
       C.mutate((d) => { d.books = d.books.filter((x) => x !== b); });
       renderAll();
@@ -223,11 +248,71 @@
       F.ok("Saved to your Cabinet. " + books.length + " book(s) on the shelf.");
       renderAll();
       C.sync("push");
+      autoPublish(books);
     } catch (e) {
       F.err(e.message);
     }
     btn.disabled = false;
     btn.textContent = "Connect";
+  }
+
+  // ----- catalog publishing -------------------------------------------
+  // Metadata-only rows are posted in the background the moment a shelf
+  // lands; the PDF joins the catalog only after you download it yourself.
+  async function autoPublish(books) {
+    if (!Folio.publish || !Folio.publish.enabled()) return;
+    const fresh = books.filter((b) => !Folio.publish.entryFor(b));
+    if (!fresh.length) return;
+    F.dim("Publishing " + fresh.length + " title(s) to the public catalog…");
+    try {
+      const n = await Folio.publish.autoPublish(fresh, (done, total, b, err) => {
+        if (err) { F.log("catalog: " + (b && b.title ? "“" + b.title + "” " : "") + err, "err"); return; }
+        if (done === total) F.ok("Catalog: " + done + " title(s) published (metadata only — PDFs join after you download).");
+      });
+      if (n) renderShelf();
+    } catch (e) {
+      F.log("catalog: " + e.message, "err");
+    }
+  }
+
+  async function publishPdf(b, bytes, filename, pages) {
+    if (!Folio.publish || !Folio.publish.enabled()) return;
+    const size = bytes.byteLength || bytes.length || 0;
+    F.dim("Catalog: uploading " + filename + " (" + F.fmtBytes(size) + ")…");
+    try {
+      await Folio.publish.publishPdf(b, bytes, filename, pages);
+      F.ok("Catalog: “" + b.title + "” is now readable in the browser.");
+      renderShelf();
+    } catch (e) {
+      F.log("catalog upload failed: " + e.message, "err");
+    }
+  }
+
+  function bindPublishToggle() {
+    const box = $("autopublish");
+    if (!box) return;
+    box.checked = Folio.publish ? Folio.publish.enabled() : true;
+    box.addEventListener("change", () => {
+      if (Folio.publish) Folio.publish.setEnabled(box.checked);
+      F.log(box.checked
+        ? "Auto-publish on — new shelves and downloaded PDFs go to the public catalog."
+        : "Auto-publish off — nothing new leaves this device.", "dim");
+    });
+  }
+
+  // ----- tutorial ------------------------------------------------------
+  function renderTutorial() {
+    const host = $("tutorial");
+    if (!host) return;
+    const eng = ENG[engSelect().value];
+    const steps = (eng && eng.meta && eng.meta.tutorial) || [];
+    if (!steps.length) { host.style.display = "none"; host.innerHTML = ""; return; }
+    host.style.display = "";
+    host.innerHTML =
+      `<h3>How to connect ${F.esc(eng.meta.label)} <span class="small muted">(5 steps)</span></h3>` +
+      `<ol class="steps">` +
+      steps.map((t) => `<li>${t}</li>`).join("") +
+      `</ol>`;
   }
 
   // ----- add by ISBN (engines without an index endpoint) --------------
@@ -264,11 +349,12 @@
     F.log("Folio · downloading “" + b.title + "”", "dim");
     try {
       const onProgress = (cur, tot) => { if (btn) btn.textContent = "page " + cur + "/" + tot; };
-      const { filename, blob, bytes } = await eng.download(b, secrets, ctx, onProgress);
+      const { filename, blob, bytes, pages } = await eng.download(b, secrets, ctx, onProgress);
       const out = blob || (bytes ? new Blob([bytes], { type: "application/pdf" }) : null);
       if (!out) throw new Error("download produced nothing");
       F.saveBlob(out, filename);
       F.ok("Saved " + filename);
+      if (bytes) publishPdf(b, bytes, filename, pages || (b.meta && b.meta.count) || 0);
     } catch (e) {
       F.err(e.message);
       if (eng.meta.needsRelay && !(await Folio.relayAvailable().catch(() => false))) {
@@ -294,10 +380,12 @@
   function init() {
     F.bindLog($("log"));
     $("connect-btn").addEventListener("click", onConnect);
-    engSelect().addEventListener("change", renderCredFields);
+    engSelect().addEventListener("change", () => { renderCredFields(); renderTutorial(); });
     $("cred-fields").addEventListener("change", (e) => { if (e.target.dataset.k === "mode") applyCredVisibility(); });
     bindIsbn();
+    bindPublishToggle();
     renderPlatformChoices();
+    renderTutorial();
 
     // Cabinet is plaintext and always open — no Cabinet, no gate, no lock.
     enterView("desk");
