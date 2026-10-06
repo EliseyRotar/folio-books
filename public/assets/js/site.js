@@ -21,8 +21,9 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     // current nav item (robust inside nested dirs)
+    // compare real paths: strip ".html", map "/x/index" to "/x", drop trailing "/"
     var norm = function (p) {
-      return (p || "").replace(/\.html$/, "").replace(/\/$/, "") || "/";
+      return (p || "").replace(/\.html$/, "").replace(/\/index$/, "/").replace(/\/$/, "") || "/";
     };
     var here = norm(location.pathname);
     document.querySelectorAll(".nav-links a").forEach(function (a) {
