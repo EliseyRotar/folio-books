@@ -199,14 +199,16 @@
     applyCredVisibility();
   }
 
+  // Field visibility driven by the first <select> in the form (platform
+  // "mode" for HUB/DiBooK, "site" for bSmart…). A field declares what it
+  // wants to be shown for via `depends`.
   function applyCredVisibility() {
-    const modeSel = document.querySelector('#cred-fields [data-k="mode"]');
-    if (!modeSel) return;
+    const driver = document.querySelector("#cred-fields select");
     document.querySelectorAll("#cred-fields [data-depends]").forEach((s) => {
       const field = s.closest(".field");
       if (!field) return;
-      if (!s.dataset.depends) { field.style.display = ""; return; }
-      field.style.display = s.dataset.depends === modeSel.value ? "" : "none";
+      const want = s.dataset.depends;
+      field.style.display = (!want || (driver && driver.value === want)) ? "" : "none";
     });
   }
 
@@ -381,7 +383,7 @@
     F.bindLog($("log"));
     $("connect-btn").addEventListener("click", onConnect);
     engSelect().addEventListener("change", () => { renderCredFields(); renderTutorial(); });
-    $("cred-fields").addEventListener("change", (e) => { if (e.target.dataset.k === "mode") applyCredVisibility(); });
+    $("cred-fields").addEventListener("change", applyCredVisibility);
     bindIsbn();
     bindPublishToggle();
     renderPlatformChoices();
