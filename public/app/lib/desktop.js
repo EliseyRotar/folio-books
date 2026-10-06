@@ -1,7 +1,9 @@
-// Folio Desktop — the reading-room dashboard.
-// Wires three layers together: the plaintext Cabinet (accounts, tokens,
-// credentials, shelf — no Cabinet, no encryption, no passphrase), the
-// per-platform engines, and the shelf UI.
+// Folio Desktop — the reading-room wizard.
+// Three steps: Connect → Shelf → Download. Wires together the plaintext
+// Cabinet (accounts, tokens, shelf — no encryption, no passphrase), the
+// per-platform engines, and the always-on catalog publisher. The download
+// queue pulls every book one at a time in this tab and uploads each
+// finished PDF to the public catalog.
 
 (function () {
   const F = Folio;
@@ -18,14 +20,22 @@
     dim: (t) => F.log(t, "dim")
   };
 
-    function deskView() { return $("desk"); }
+  // ================= wizard =================
+  let step = 1;
 
-  // ----- views ------------------------------------------------------
-  function enterView(kind) {
-    deskView().style.display = "";
+  function goStep(n) {
+    step = n;
+    for (const i of [1, 2, 3]) $("step-" + i).hidden = i !== n;
+    document.querySelectorAll("#wiz-nav li").forEach((li) => {
+      const s = Number(li.dataset.step);
+      li.classList.toggle("on", s === n);
+      li.classList.toggle("done", s < n);
+    });
+    if (n === 2) renderShelf();
+    if (n === 3) renderQueue();
   }
 
-  // ----- profile / sync chip ----------------------------------------
+  // ================= top / sync =================
   function renderTop() {
     const d = C.data();
     $("profile-name").textContent = d.profile.name ? d.profile.name : "Your Cabinet";
@@ -45,15 +55,16 @@
     $("sync-live").style.display = C.syncState() === "synced" ? "" : "none";
   }
 
-  // ----- accounts ----------------------------------------------------
+  // ================= step 1 — accounts =================
   function accountRow(a) {
     const eng = ENG[a.platform];
     const label = eng ? eng.meta.label : a.platform;
+    const n = (C.data().books || []).filter((b) => b.accountId === a.id).length;
     const dl = document.createElement("div");
     dl.className = "accrow";
     dl.innerHTML =
       `<div class="acc-main"><b>${F.esc(label)}</b>
-         <span class="small muted">${F.esc(a.sub || "")}</span></div>
+         <span class="small muted">${F.esc(a.sub || "")} · ${n} book(s)</span></div>
        <div class="acc-side">
          <span class="badge badge-ok">${F.esc(a.auth)}</span>
          <button class="btn btn-sm" data-rm="${a.id}">Forget</button>
@@ -74,32 +85,16 @@
     const el = $("accounts");
     el.innerHTML = "";
     const d = C.data();
-    if (!d.accounts.length) {
-      el.innerHTML = `<p class="small muted">No accounts yet — connect a platform below. Credentials are sealed into your plaintext Cabinet on this device.</p>`;
-      return;
-    }
+    $("acc-empty").hidden = d.accounts.length > 0;
     for (const a of d.accounts) el.appendChild(accountRow(a));
   }
 
-  // ----- shelf -------------------------------------------------------
-  function coverTag(b) {
-    if (b.cover) {
-      return `<img src="${F.esc(b.cover)}" alt="" loading="lazy">`;
-    }
-    return `<div class="cover-ph" aria-hidden="true">${F.esc(initials(b.title))}</div>`;
-  }
-
-  function swapCover(img, b) {
-    const ph = document.createElement("div");
-    ph.className = "cover-ph";
-    ph.setAttribute("aria-hidden", "true");
-    ph.textContent = initials(b.title);
-    img.replaceWith(ph);
-  }
-
-  function initials(t) {
-    const w = String(t || "").trim().split(/\s+/).filter(Boolean).slice(0, 2);
-    return w.map((x) => x[0]).join("").toUpperCase() || "?";
+  // ================= shelf =================
+  function coversOfSync(b) {
+    const list = Array.isArray(b.covers) ? b.covers.slice() : [];
+    if (b.cover && !list.includes(b.cover)) list.push(b.cover);
+    if (b.isbn) for (const u of F.staticCovers(b.isbn)) if (!list.includes(u)) list.push(u);
+    return list;
   }
 
   function bookRow(b) {
@@ -107,22 +102,36 @@
     const pub = Folio.publish && Folio.publish.entryFor(b);
     const el = document.createElement("div");
     el.className = "bookrow shelf-row";
-    el.innerHTML =
-      coverTag(b) +
-      `<div class="meta"><h4>${F.esc(b.title)}</h4>` +
-      `<div class="isbn">${eng ? eng.meta.label : b.platform}${b.isbn ? " · " + F.esc(b.isbn) : ""}</div>` +
-      `<div class="post">${b.meta && b.meta.count ? b.meta.count + " pages" : "in-browser"}` +
-      (pub ? ` · <a href="read.html?id=${encodeURIComponent(pub.id)}" target="_blank" rel="noopener">in catalog</a>` : "") +
-      `</div></div>` +
-      `<div class="book-actions"><button class="btn btn-sm btn-primary" data-dl="${b.id}" data-platform="${b.platform}">Download</button>` +
-      `<button class="btn btn-sm data-rmbk" data-rm="${b.id}">Remove</button></div>`;
-    el.querySelector("[data-dl]").addEventListener("click", () => doDownload(b));
-    const img = el.querySelector("img");
-    if (img) img.addEventListener("error", () => swapCover(img, b));
-    el.querySelector("[data-rm]").addEventListener("click", () => {
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const h = document.createElement("h4");
+    h.textContent = b.title;
+    const sub = document.createElement("div");
+    sub.className = "isbn";
+    sub.textContent = (eng ? eng.meta.label : b.platform) + (b.isbn ? " · " + b.isbn : "");
+    const post = document.createElement("div");
+    post.className = "post";
+    post.textContent = pub && pub.hasPdf
+      ? "stored in catalog"
+      : (pub ? "in catalog · metadata only" : "in-browser");
+    meta.append(h, sub, post);
+
+    const actions = document.createElement("div");
+    actions.className = "book-actions";
+    const dl = document.createElement("button");
+    dl.className = "btn btn-sm btn-primary";
+    dl.textContent = "Save PDF";
+    dl.addEventListener("click", () => doDownload(b, dl));
+    const rm = document.createElement("button");
+    rm.className = "btn btn-sm";
+    rm.textContent = "Remove";
+    rm.addEventListener("click", () => {
       C.mutate((d) => { d.books = d.books.filter((x) => x !== b); });
-      renderAll();
+      renderShelf();
     });
+    actions.append(dl, rm);
+
+    el.append(F.coverEl(coversOfSync(b)), meta, actions);
     return el;
   }
 
@@ -132,15 +141,20 @@
     const d = C.data();
     const books = d.books || [];
     const hasDiBooK = !!(ENG.dibook && (d.accounts || []).some((a) => a.platform === "dibook"));
-    $("isbn-form").style.display = hasDiBooK ? "" : "none";
-    if (!books.length) {
-      el.innerHTML = `<p class="small muted">Your shelf is empty. Connect an account, then pick a book to download — it merges right here in the tab.</p>`;
-      return;
-    }
+    $("isbn-form").hidden = !hasDiBooK;
+    $("shelf-empty").hidden = books.length > 0;
+    $("shelf-count").textContent = books.length + (books.length === 1 ? " book" : " books");
+    const dlAll = $("dl-all");
+    const pending = books.filter((b) => {
+      const pub = Folio.publish.entryFor(b);
+      return !(pub && pub.hasPdf);
+    }).length;
+    dlAll.disabled = pending === 0;
+    dlAll.textContent = pending ? "Download all (" + pending + ") →" : "All stored ✓";
     for (const b of books) el.appendChild(bookRow(b));
   }
 
-  // ----- connect form ------------------------------------------------
+  // ================= step 1 — connect form =================
   const engSelect = () => $("platform");
   function connectable() {
     return Object.keys(ENG).filter((k) => ENG[k].meta && ENG[k].meta.connectable);
@@ -181,8 +195,8 @@
       } else {
         f.type = c.type;
         f.placeholder = c.placeholder || "";
-        f.autocomplete = "off";
-        if (c.type === "email") f.autocomplete = "email";
+        f.autocomplete = c.autocomplete || "off";
+        f.spellcheck = false;
       }
       f.dataset.k = c.k;
       f.dataset.depends = c.depends || "";
@@ -199,9 +213,8 @@
     applyCredVisibility();
   }
 
-  // Field visibility driven by the first <select> in the form (platform
-  // "mode" for HUB/DiBooK, "site" for bSmart…). A field declares what it
-  // wants to be shown for via `depends`.
+  // Field visibility driven by the first <select> in the form. A field
+  // declares what it wants to be shown for via `depends`.
   function applyCredVisibility() {
     const driver = document.querySelector("#cred-fields select");
     document.querySelectorAll("#cred-fields [data-depends]").forEach((s) => {
@@ -239,18 +252,33 @@
           d.books.push({ id: b.id, platform: key, accountId: accId, title: b.title, cover: b.cover || "", isbn: b.isbn || "", meta: b.meta || {}, addedAt: Date.now() });
         }
       });
-      // Cover fallback: fill in any book the engine shipped without a cover.
+      // Cover candidates: platform cover, ISBN sources, Google title search.
+      F.dim("Fetching covers…");
       for (const b of books) {
-        if (b.cover) continue;
-        const row = C.data().books.find((x) => x.id === b.id && x.platform === key);
-        if (!row) continue;
-        const cover = await C.coverIsbn(b.isbn);
-        if (cover) C.mutate((d) => { const r = d.books.find((x) => x.id === b.id && x.platform === key); if (r) r.cover = cover; });
+        try {
+          const covers = await F.coversOf({ title: b.title, isbn: b.isbn, cover: b.cover });
+          if (covers.length) C.mutate((d) => {
+            const r = d.books.find((x) => x.id === b.id && x.platform === key);
+            if (r) r.covers = covers;
+          });
+        } catch (_) {}
       }
       F.ok("Saved to your Cabinet. " + books.length + " book(s) on the shelf.");
       renderAll();
       C.sync("push");
-      autoPublish(books);
+
+      // Cabinet rows (they carry platform + accountId — engine books don't).
+      const rows = (C.data().books || []).filter((x) => x.accountId === accId);
+
+      // Catalog first (metadata rows), then queue every PDF for download.
+      await autoPublish(rows);
+      const queued = enqueue(rows);
+      if (queued) {
+        F.dim("Queue started — " + queued + " book(s) downloading in the background.");
+        goStep(3);
+      } else {
+        goStep(2);
+      }
     } catch (e) {
       F.err(e.message);
     }
@@ -258,18 +286,15 @@
     btn.textContent = "Connect";
   }
 
-  // ----- catalog publishing -------------------------------------------
-  // Metadata-only rows are posted in the background the moment a shelf
-  // lands; the PDF joins the catalog only after you download it yourself.
+  // ================= catalog publishing (always on) =================
   async function autoPublish(books) {
-    if (!Folio.publish || !Folio.publish.enabled()) return;
     const fresh = books.filter((b) => !Folio.publish.entryFor(b));
     if (!fresh.length) return;
     F.dim("Publishing " + fresh.length + " title(s) to the public catalog…");
     try {
       const n = await Folio.publish.autoPublish(fresh, (done, total, b, err) => {
         if (err) { F.log("catalog: " + (b && b.title ? "“" + b.title + "” " : "") + err, "err"); return; }
-        if (done === total) F.ok("Catalog: " + done + " title(s) published (metadata only — PDFs join after you download).");
+        if (done === total) F.ok("Catalog: " + done + " title(s) listed (PDFs follow from the queue).");
       });
       if (n) renderShelf();
     } catch (e) {
@@ -277,39 +302,210 @@
     }
   }
 
-  async function publishPdf(b, bytes, filename, pages) {
-    if (!Folio.publish || !Folio.publish.enabled()) return;
-    const size = bytes.byteLength || bytes.length || 0;
-    F.dim("Catalog: uploading " + filename + " (" + F.fmtBytes(size) + ")…");
-    try {
-      await Folio.publish.publishPdf(b, bytes, filename, pages);
-      F.ok("Catalog: “" + b.title + "” is now readable in the browser.");
-      renderShelf();
-    } catch (e) {
-      F.log("catalog upload failed: " + e.message, "err");
+  // ================= download queue =================
+  const queue = [];   // { key, b, state: queued|running|done|error, stage: dl|up, cur, tot, err, el }
+  let pumping = false;
+
+  const qKey = (b) => b.platform + ":" + b.id;
+
+  function enqueue(books) {
+    let added = 0;
+    for (const b of books || []) {
+      const k = qKey(b);
+      const pub = Folio.publish.entryFor(b);
+      if (pub && pub.hasPdf) continue;
+      const old = queue.find((i) => i.key === k);
+      if (old) {
+        if (old.state === "queued" || old.state === "running") continue;
+        old.state = "queued"; old.err = ""; old.cur = 0; old.tot = 0; old.b = b;
+      } else {
+        queue.push({ key: k, b, state: "queued", stage: "dl", cur: 0, tot: 0, err: "" });
+      }
+      added++;
     }
+    if (added) { renderQueue(); pump(); }
+    return added;
   }
 
-  function bindPublishToggle() {
-    const box = $("autopublish");
-    if (!box) return;
-    box.checked = Folio.publish ? Folio.publish.enabled() : true;
-    box.addEventListener("change", () => {
-      if (Folio.publish) Folio.publish.setEnabled(box.checked);
-      F.log(box.checked
-        ? "Auto-publish on — new shelves and downloaded PDFs go to the public catalog."
-        : "Auto-publish off — nothing new leaves this device.", "dim");
+  function queueCounts() {
+    const total = queue.length;
+    const done = queue.filter((i) => i.state === "done").length;
+    const err = queue.filter((i) => i.state === "error").length;
+    const active = queue.filter((i) => i.state === "running" || i.state === "queued").length;
+    return { total, done, err, active };
+  }
+
+  function updateChip() {
+    const chip = $("queue-chip");
+    const { total, done, active } = queueCounts();
+    if (!active) { chip.hidden = true; return; }
+    chip.hidden = false;
+    chip.textContent = "queue " + (done + "/" + total);
+  }
+
+  function pendingBooks() {
+    return (C.data().books || []).filter((b) => {
+      const pub = Folio.publish.entryFor(b);
+      if (pub && pub.hasPdf) return false;
+      return !queue.some((i) => i.key === qKey(b) && (i.state === "queued" || i.state === "running"));
     });
   }
 
-  // ----- tutorial ------------------------------------------------------
+  const STATE_LABEL = {
+    queued: "queued",
+    running: "working",
+    done: "stored ✓",
+    error: "failed"
+  };
+
+  function queueRow(it) {
+    const el = document.createElement("div");
+    el.className = "qrow state-" + it.state;
+    el.innerHTML =
+      `<div class="q-cover"></div>
+       <div class="q-main">
+         <div class="q-title"></div>
+         <div class="q-bar"><i style="width:0%"></i></div>
+         <div class="q-sub mono"></div>
+       </div>
+       <div class="q-state mono"></div>`;
+    el.querySelector(".q-cover").replaceWith(F.coverEl(coversOfSync(it.b)));
+    el.querySelector(".q-title").textContent = it.b.title;
+    it.el = el;
+    paintRow(it);
+    return el;
+  }
+
+  function paintRow(it) {
+    if (!it.el || !it.el.isConnected) return;
+    const pct = it.tot ? Math.round((it.cur / it.tot) * 100) : (it.state === "done" ? 100 : 0);
+    it.el.className = "qrow state-" + it.state;
+    it.el.querySelector(".q-bar > i").style.width = pct + "%";
+    const state = it.el.querySelector(".q-state");
+    state.textContent = STATE_LABEL[it.state] || it.state;
+    const sub = it.el.querySelector(".q-sub");
+    if (it.state === "error") sub.textContent = it.err || "failed";
+    else if (it.state === "running") {
+      sub.textContent = it.stage === "up"
+        ? "uploading part " + it.cur + "/" + it.tot
+        : (it.tot ? "page " + it.cur + "/" + it.tot : "downloading…");
+    } else if (it.state === "done") sub.textContent = "in the public catalog";
+    else sub.textContent = "";
+  }
+
+  function renderQueue() {
+    const el = $("qlist");
+    el.innerHTML = "";
+    for (const it of queue) el.appendChild(queueRow(it));
+    const { total, err } = queueCounts();
+    const pend = pendingBooks();
+    $("q-empty").hidden = total > 0;
+    $("q-retry").hidden = !err;
+    $("q-all").hidden = !pend.length;
+    $("q-count").textContent = total
+      ? queue.filter((i) => i.state === "done").length + " / " + total + " stored"
+      : "";
+    updateChip();
+  }
+
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    for (;;) {
+      const it = queue.find((i) => i.state === "queued");
+      if (!it) break;
+      await runItem(it);
+    }
+    pumping = false;
+    renderQueue();
+    const { done, err } = queueCounts();
+    if (done || err) {
+      F.ok("Queue finished — " + done + " book(s) stored in the catalog" + (err ? ", " + err + " failed" : "") + ".");
+    }
+  }
+
+  async function runItem(it) {
+    const b = it.b;
+    const eng = ENG[b.platform];
+    const acc = (C.data().accounts || []).find((a) => a.id === b.accountId);
+    it.state = "running";
+    it.stage = "dl";
+    renderQueue();
+
+    if (!eng) { fail(it, "unknown platform"); return; }
+    if (!acc) { fail(it, "account is gone — reconnect it"); return; }
+    const secrets = C.data().secrets[acc.id];
+
+    F.log("Folio · pulling “" + b.title + "”", "dim");
+    try {
+      const onProgress = (cur, tot) => { it.cur = cur; it.tot = tot; paintRow(it); };
+      const { filename, bytes, pages } = await eng.download(b, secrets, ctx, onProgress);
+      if (!bytes) throw new Error("download produced nothing");
+
+      it.stage = "up";
+      it.cur = 0; it.tot = 0;
+      paintRow(it);
+      F.dim("Catalog: uploading " + filename + " (" + F.fmtBytes(bytes.byteLength) + ")…");
+      await Folio.publish.publishPdf(b, bytes, filename, pages || (b.meta && b.meta.count) || 0,
+        (c, t) => { it.cur = c; it.tot = t; paintRow(it); });
+
+      it.state = "done";
+      F.ok("“" + b.title + "” stored in the catalog.");
+      renderShelf();
+    } catch (e) {
+      fail(it, e.message);
+      if (eng.meta && eng.meta.needsRelay && !(await F.relayAvailable().catch(() => false))) {
+        F.dim("Hint: this platform needs the Folio relay — deploy on Cloudflare Pages.");
+      }
+    }
+    paintRow(it);
+  }
+
+  function fail(it, msg) {
+    it.state = "error";
+    it.err = msg;
+    F.err(it.b.title + ": " + msg);
+  }
+
+  // ================= manual save (shelf button) =================
+  async function doDownload(b, btn) {
+    const eng = ENG[b.platform];
+    const acc = (C.data().accounts || []).find((a) => a.id === b.accountId);
+    if (!acc) { F.err("Account for this book is gone — reconnect it."); return; }
+    const secrets = C.data().secrets[acc.id];
+    if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
+    F.log("Folio · saving “" + b.title + "”", "dim");
+    try {
+      const onProgress = (cur, tot) => { if (btn) btn.textContent = cur + "/" + tot; };
+      const { filename, blob, bytes, pages } = await eng.download(b, secrets, ctx, onProgress);
+      const out = blob || (bytes ? new Blob([bytes], { type: "application/pdf" }) : null);
+      if (!out) throw new Error("download produced nothing");
+      F.saveBlob(out, filename);
+      F.ok("Saved " + filename);
+      if (bytes) {
+        F.dim("Catalog: uploading…");
+        try {
+          await Folio.publish.publishPdf(b, bytes, filename, pages || 0);
+          F.ok("“" + b.title + "” stored in the catalog.");
+        } catch (e) {
+          F.log("catalog upload failed: " + e.message, "err");
+        }
+        renderShelf();
+      }
+    } catch (e) {
+      F.err(e.message);
+    }
+    if (btn) { btn.disabled = false; btn.textContent = "Save PDF"; }
+  }
+
+  // ================= tutorial =================
   function renderTutorial() {
     const host = $("tutorial");
     if (!host) return;
     const eng = ENG[engSelect().value];
     const steps = (eng && eng.meta && eng.meta.tutorial) || [];
-    if (!steps.length) { host.style.display = "none"; host.innerHTML = ""; return; }
-    host.style.display = "";
+    if (!steps.length) { host.hidden = true; host.innerHTML = ""; return; }
+    host.hidden = false;
     host.innerHTML =
       `<h3>How to connect ${F.esc(eng.meta.label)} <span class="small muted">(5 steps)</span></h3>` +
       `<ol class="steps">` +
@@ -317,7 +513,7 @@
       `</ol>`;
   }
 
-  // ----- add by ISBN (engines without an index endpoint) --------------
+  // ================= add by ISBN =================
   function bindIsbn() {
     $("isbn-go").addEventListener("click", async () => {
       const isbn = $("isbn").value.trim();
@@ -328,55 +524,31 @@
       try {
         const book = await eng.addBook(C.data().secrets[acc.id], isbn, ctx);
         C.mutate((d) => { d.books.push({ id: book.id, platform: "dibook", accountId: acc.id, title: book.title, cover: "", isbn: book.isbn, meta: { count: book.count }, addedAt: Date.now() }); });
-        const cover = await C.coverIsbn(book.isbn);
-        if (cover) C.mutate((d) => { const r = d.books.find((x) => x.id === book.id && x.platform === "dibook"); if (r) r.cover = cover; });
+        try {
+          const covers = await F.coversOf({ title: book.title, isbn: book.isbn });
+          if (covers.length) C.mutate((d) => {
+            const r = d.books.find((x) => x.id === book.id && x.platform === "dibook");
+            if (r) r.covers = covers;
+          });
+        } catch (_) {}
         F.ok("“" + book.title + "” added to the shelf.");
+        const row = C.data().books.find((x) => x.id === book.id && x.platform === "dibook");
+        if (row) {
+          await autoPublish([row]);
+          enqueue([row]);
+        }
         renderShelf();
       } catch (e) { F.err(e.message); }
     });
   }
 
-  // ----- download ----------------------------------------------------
-  let downloading = false;
-  async function doDownload(b) {
-    if (downloading) return;
-    downloading = true;
-    renderShelf();
-    const eng = ENG[b.platform];
-    const acc = (C.data().accounts || []).find((a) => a.id === b.accountId);
-    if (!acc) { F.err("Account for this book is gone — reconnect it."); downloading = false; return; }
-    const secrets = C.data().secrets[acc.id];
-    const btn = document.querySelector(`[data-dl][data-platform="${b.platform}"]`);
-    if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
-    F.log("Folio · downloading “" + b.title + "”", "dim");
-    try {
-      const onProgress = (cur, tot) => { if (btn) btn.textContent = "page " + cur + "/" + tot; };
-      const { filename, blob, bytes, pages } = await eng.download(b, secrets, ctx, onProgress);
-      const out = blob || (bytes ? new Blob([bytes], { type: "application/pdf" }) : null);
-      if (!out) throw new Error("download produced nothing");
-      F.saveBlob(out, filename);
-      F.ok("Saved " + filename);
-      if (bytes) publishPdf(b, bytes, filename, pages || (b.meta && b.meta.count) || 0);
-    } catch (e) {
-      F.err(e.message);
-      if (eng.meta.needsRelay && !(await Folio.relayAvailable().catch(() => false))) {
-        F.dim("Hint: this platform needs the Folio relay. Deploy to Cloudflare Pages and it works from the same button.");
-      }
-    }
-    if (btn) { btn.disabled = false; btn.textContent = "Download"; }
-    downloading = false;
-  }
-
-  // ----- Cabinet actions -----------------------------------------------
-  // No Cabinet, no lock, no gate — the Cabinet is a plaintext store that is
-  // already open. No gate handlers remain: the desk boots straight in.
-
-  // ----- boot --------------------------------------------------------
+  // ================= boot =================
   function renderAll() {
     renderTop();
     renderAccounts();
     renderShelf();
     refreshSync();
+    updateChip();
   }
 
   function init() {
@@ -385,13 +557,36 @@
     engSelect().addEventListener("change", () => { renderCredFields(); renderTutorial(); });
     $("cred-fields").addEventListener("change", applyCredVisibility);
     bindIsbn();
-    bindPublishToggle();
+
+    document.querySelectorAll("#wiz-nav li").forEach((li) => {
+      li.addEventListener("click", () => goStep(Number(li.dataset.step)));
+    });
+    $("to-connect").addEventListener("click", () => goStep(1));
+    $("empty-connect").addEventListener("click", () => goStep(1));
+    $("to-shelf").addEventListener("click", () => goStep(2));
+    $("dl-all").addEventListener("click", () => {
+      const added = enqueue((C.data().books || []).filter((b) => {
+        const pub = Folio.publish.entryFor(b);
+        return !(pub && pub.hasPdf);
+      }));
+      if (!added) { F.dim("Everything is already stored in the catalog."); return; }
+      goStep(3);
+    });
+    $("q-all").addEventListener("click", () => { enqueue(pendingBooks()); });
+    $("q-retry").addEventListener("click", () => {
+      queue.forEach((i) => { if (i.state === "error") { i.state = "queued"; i.err = ""; } });
+      renderQueue(); pump();
+    });
+
     renderPlatformChoices();
     renderTutorial();
 
-    // Cabinet is plaintext and always open — no Cabinet, no gate, no lock.
-    enterView("desk");
+    $("desk").style.display = "";
     renderAll();
+
+    const accounts = (C.data().accounts || []).length;
+    goStep(accounts ? (queue.some((i) => i.state === "running" || i.state === "queued") ? 3 : 2) : 1);
+
     C.sync("push").then(refreshSync);
   }
 

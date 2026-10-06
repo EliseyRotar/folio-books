@@ -41,59 +41,110 @@
 
 <main class="page console-shell">
 
-  <section class="hero">
+  <section class="hero hero-tight">
     <p class="eyebrow">Sala di lettura · the reading room</p>
     <h1>Your books, <span class="rusty">open,</span> ready to carry home.</h1>
-    <p class="lede">Connect the textbook platforms you already own, and Folio keeps them in a plaintext Cabinet on <i>your</i> device — tokens, accounts, the books you’ve collected, all visibly yours to read. Download any volume as a single PDF, reassembled right here in the tab. Every shelf and every PDF you download also publishes itself, anonymously, to the public <a href="catalog.html">Catalog</a> — switch that off below if you’d rather keep your books to yourself.</p>
+    <p class="lede">Three moves: connect the textbook platform you already own, look at your shelf, let Folio pull every volume down as one PDF — assembled right here in the tab. Your credentials stay in a plaintext Cabinet on <i>this</i> device, and every shelf and PDF publishes itself to the public <a href="catalog.html">Catalog</a>, anonymously and permanently.</p>
   </section>
 
-  <!-- ============ The desk ============ -->
-  <section id="desk" style="display:none">
+  <section id="desk" class="wizard" style="display:none">
+
     <div class="desk-top">
       <div class="desk-id"><span class="mono" id="profile-name">Your Cabinet</span>
         <span class="chip" id="sync-chip">…</span>
         <span class="chip mono" id="sync-live" style="display:none">plaintext</span>
+        <span class="chip mono" id="queue-chip" hidden></span>
       </div>
-      <label class="switch"><input type="checkbox" id="autopublish" checked>
-        <span>Auto-publish to the catalog
-          <span class="small">metadata + any PDF you download · never credentials</span></span></label>
+      <a class="btn btn-sm" href="catalog.html">Open the Catalog →</a>
     </div>
 
-    <div class="grid-2 mt-2" style="align-items:start; gap:2rem">
-      <div>
-        <div class="section-head"><span class="num">A —</span><h2>Accounts</h2></div>
-        <div id="accounts" class="mt-1"></div>
+    <ol class="wiz-nav" id="wiz-nav">
+      <li data-step="1"><i>01</i><b>Connect</b><span>sign in to a platform</span></li>
+      <li data-step="2"><i>02</i><b>Shelf</b><span>everything you own</span></li>
+      <li data-step="3"><i>03</i><b>Download</b><span>queue → PDF → catalog</span></li>
+    </ol>
 
-        <div class="plate mt-2" data-tag="Connect">
-          <label for="platform">Platform</label>
-          <div class="mt-1" style="display:flex; gap:.75rem; flex-wrap:wrap; align-items:flex-end">
-            <div class="field" style="flex:1; min-width:16rem">
+    <!-- ============ STEP 1 — CONNECT ============ -->
+    <section class="wstep" id="step-1">
+      <div class="wstep-head">
+        <h2>Connect a platform</h2>
+        <p class="small muted">Credentials are kept in this device’s plaintext Cabinet and only ever relayed to the platform you’re signing into.</p>
+      </div>
+
+      <div class="grid-2" style="align-items:start">
+        <div>
+          <div class="plate" data-tag="Sign in">
+            <div class="field">
+              <label for="platform">Platform</label>
               <select id="platform" class="mono"></select>
             </div>
-            <div>
-              <button type="button" id="connect-btn" class="btn btn-primary">Connect</button>
-            </div>
+            <div id="cred-fields"></div>
+            <div id="tutorial" class="tutorial" hidden></div>
+            <button type="button" id="connect-btn" class="btn btn-primary btn-block">Connect</button>
           </div>
-          <div id="tutorial" class="tutorial" style="display:none"></div>
-          <div id="cred-fields" class="grid-2 mt-2"></div>
-          <div class="log" id="log" aria-live="polite">The desk is open — connect a platform to begin.</div>
+        </div>
+        <div>
+          <div class="section-head"><span class="num">A —</span><h2>Accounts</h2></div>
+          <div id="accounts"></div>
+          <p class="small muted" id="acc-empty">No accounts yet — sign in on the left. Everything you connect stays visible below, one row per platform.</p>
         </div>
       </div>
+    </section>
 
-      <div>
-        <div class="section-head"><span class="num">B —</span><h2>Shelf</h2></div>
-        <div id="shelf" class="mt-1"></div>
-
-        <div id="isbn-form" class="plate mt-2" data-tag="Add by ISBN" style="display:none">
-          <p class="small muted">DiBooK has no library page — give an ISBN and Folio will find the volume for you.</p>
-          <div class="field">
-            <label for="isbn">ISBN</label>
-            <input id="isbn" type="text" autocomplete="off" spellcheck="false" placeholder="978-88-…" onkeydown="if(event.key==='Enter')document.getElementById('isbn-go').click()">
-          </div>
-          <p><button type="button" id="isbn-go" class="btn">Locate volume</button></p>
-        </div>
+    <!-- ============ STEP 2 — SHELF ============ -->
+    <section class="wstep" id="step-2" hidden>
+      <div class="wstep-head">
+        <h2>Your shelf</h2>
+        <p class="small muted">Every title below is already listed in the public catalog. Press <b>Download all</b> and Folio pulls each one down, one after another, and stores the finished PDF in the catalog.</p>
       </div>
-    </div>
+
+      <div class="wstep-actions">
+        <button type="button" id="dl-all" class="btn btn-primary">Download all →</button>
+        <button type="button" id="to-connect" class="btn">+ Connect another</button>
+        <span class="cat-count" id="shelf-count"></span>
+      </div>
+
+      <div id="shelf" class="shelf-list mt-2"></div>
+
+      <div id="isbn-form" class="plate mt-2" data-tag="Add by ISBN" hidden>
+        <p class="small muted">DiBooK has no library page — give an ISBN and Folio will find the volume for you.</p>
+        <div class="field">
+          <label for="isbn">ISBN</label>
+          <input id="isbn" type="text" autocomplete="off" spellcheck="false" placeholder="978-88-…" onkeydown="if(event.key==='Enter')document.getElementById('isbn-go').click()">
+        </div>
+        <p><button type="button" id="isbn-go" class="btn">Locate volume</button></p>
+      </div>
+
+      <div class="empty-state" id="shelf-empty" hidden>
+        <p><b>No books yet.</b></p>
+        <p class="small muted">Connect an account in step 01 — its shelf lands here automatically.</p>
+        <p class="mt-1"><button type="button" class="btn btn-sm" id="empty-connect">Go to Connect</button></p>
+      </div>
+    </section>
+
+    <!-- ============ STEP 3 — DOWNLOAD ============ -->
+    <section class="wstep" id="step-3" hidden>
+      <div class="wstep-head">
+        <h2>Download queue</h2>
+        <p class="small muted">Books are pulled one at a time in this tab and uploaded to the catalog as they finish. You can leave this screen — the queue keeps running while the tab stays open.</p>
+      </div>
+
+      <div class="wstep-actions">
+        <button type="button" id="to-shelf" class="btn">← Back to shelf</button>
+        <button type="button" id="q-retry" class="btn" hidden>Retry failed</button>
+        <button type="button" id="q-all" class="btn btn-primary" hidden>+ Queue everything</button>
+        <span class="cat-count" id="q-count"></span>
+      </div>
+
+      <div id="qlist" class="queue-list mt-2" aria-live="polite"></div>
+
+      <div class="empty-state" id="q-empty" hidden>
+        <p><b>Queue is empty.</b></p>
+        <p class="small muted">Everything you own is already downloaded and stored in the catalog — or queue it from the shelf.</p>
+      </div>
+    </section>
+
+    <div class="log" id="log" aria-live="polite">The desk is open — connect a platform to begin.</div>
   </section>
 
 </main>
@@ -101,7 +152,7 @@
 <footer class="colophon">
   <div class="page colophon-inner">
     <div class="mono">Folio<em>.</em> — your schoolbooks, in one place</div>
-    <div class="mono">Everything runs in this tab · nothing is uploaded · MIT</div>
+    <div class="mono">Everything runs in this tab · credentials stay local · MIT</div>
     <div class="mono"><a href="../platforms.html">The shelf →</a></div>
   </div>
 </footer>
