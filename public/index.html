@@ -57,7 +57,7 @@
   <section class="hero">
     <p class="eyebrow">Download schoolbooks, in your browser</p>
     <h1>One shelf for <span class="rusty">every</span> textbook you own.</h1>
-    <p class="lede">Folio turns the digital textbooks you already have — HUB Scuola, MyLim, DiBooK, bSmart and more — back into ordinary PDFs you keep for years. Everything is downloaded and assembled right here in the tab: your accounts live in an plaintext Cabinet on your own device, and nothing you type is uploaded anywhere.</p>
+    <p class="lede">Folio turns the digital textbooks you already have — HUB Scuola, MyLim, DiBooK, bSmart and more — back into ordinary PDFs you keep for years. Everything is downloaded and assembled right here in the tab: your accounts live in a plaintext Cabinet on your own device, and the keys you type are never sent anywhere.</p>
     <p class="mt-2">
       <a class="btn btn-primary" href="app/index.html">Open the Reader →</a>
       <a class="btn" href="platforms.html">See all platforms</a>
@@ -76,7 +76,7 @@
       <span class="num">I —</span>
       <h2>Download in the browser, today</h2>
     </div>
-    <p class="muted" style="max-width:70ch">These platforms connect straight from the Reader. Drop in your token (or, for HUB, your email and password), pick your book, and Folio reassembles it into one PDF in your Downloads folder. Your credentials are kept in a plaintext Cabinet on your device, keyed by a passphrase only you know.</p>
+    <p class="muted" style="max-width:70ch">These platforms connect straight from the Reader. Drop in your token (or, for HUB, your email and password), pick your book, and Folio reassembles it into one PDF — queued automatically for the whole shelf. Your credentials are kept in a plaintext Cabinet on your device: visible to you, never sent anywhere except to the platform you’re already signed into.</p>
     <div class="cards mt-2">
       <a class="card" href="app/index.html">
         <span class="tag">HUB Scuola · Mondadori Education</span>
@@ -142,13 +142,13 @@
       <div>
         <h3>Nothing to install</h3>
         <p>No app, no account with us, no waiting room. The Reader works on any modern desktop browser.</p>
-        <h3 class="mt-2">Nothing uploaded</h3>
-        <p>Your token and password are sealed into a Cabinet on your own device with a passphrase only you know. What reaches the network is either an plaintext blob or a byte-for-byte relay to the platform you’re already logged into.</p>
+        <h3 class="mt-2">Keys stay local</h3>
+        <p>Your token and password live in a plaintext Cabinet on your own device — readable by you, kept out of every request except the byte-for-byte relay to the platform you’re already logged into. Connect once and the whole shelf downloads itself in the background, one book after another.</p>
         <h3 class="mt-2">Nothing to pay</h3>
         <p>Free hosting, free bandwidth, open source. The site is a static page; the extra relay is a standard free Cloudflare tier.</p>
       </div>
       <div class="notice"><b>How the Cabinet works</b><br>
-      You set one passphrase. It never leaves this tab — the browser derives a key and seals your accounts, tokens and shelf into a single plaintext blob. That blob can be backed up to free storage on your behalf; without your passphrase it is unreadable. Lost passphrase means a sealed Cabinet — make a hint that only you understand.
+      There is nothing to unlock. Your accounts, tokens and shelf sit in one plaintext JSON store on this device, mirrored to your own Cloudflare D1 if you deploy the site — open the page and the desk is right there. Nothing is encrypted or hidden <i>from you</i>: check it yourself in DevTools. What never leaves the device is anything you didn’t publish — and every shelf and PDF you <i>do</i> publish goes to the public catalog anonymously, always.
       </div>
     </div>
   </section>

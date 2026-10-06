@@ -55,7 +55,7 @@
         <p class="small">On Windows/Linux: <code>F12</code> or <code>Ctrl+Shift+I</code>. On macOS: <code>Cmd+Option+I</code>. Right-click → “Inspect” works too.</p>
         <h4 class="mt-2">Enable network log</h4>
         <p class="small">In the <b>Network</b> tab, tick <b>Preserve log</b>. Hard-refresh the reader page (<code>Ctrl/Cmd+Shift+R</code>) so the book’s API calls appear as they load.</p>
-        <div class="notice mt-2"><b>Privacy first</b><br>A token grants access to your books. Folio keeps it sealed on your device and uses it only to fetch your own pages. On shared machines, lock the Cabinet or close the tab when you’re done.</div>
+        <div class="notice mt-2"><b>Privacy first</b><br>A token grants access to your books. Folio keeps it in your plaintext Cabinet on your device and uses it only to fetch your own pages. On shared machines, clear the Cabinet (Forget the account) or close the tab when you’re done.</div>
       </div>
       <div class="plate" data-tag="Local Storage vs Cookie">
         <p class="small"><b>Local Storage / Session Storage</b> — find under <code>Application → Storage → Local Storage → https://platform</code>. Look for keys like <code>token</code>, <code>jwtToken</code>, <code>auth_token</code>, <code>tokenId</code>.</p>
@@ -105,7 +105,7 @@
   </section>
 
   <section class="section">
-    <div class="warn"><b>Handle with care.</b> A token is a live credential. What follows in Folio runs where you are: your keys are sealed on your device with a passphrase you choose, and the only network traffic is to the platform you’re already logged into. Anyone asking you to upload a token to a server is a scam — a real downloader always runs <i>where you are</i>.</div>
+    <div class="warn"><b>Handle with care.</b> A token is a live credential. What follows in Folio runs where you are: your keys sit in a plaintext Cabinet on your device, and the only network traffic carrying them is the relay to the platform you’re already logged into. Anyone asking you to upload a token to a server is a scam — a real downloader always runs <i>where you are</i>.</div>
   </section>
 
 </main>
