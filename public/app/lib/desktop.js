@@ -1,9 +1,9 @@
 // Folio Desktop — the reading-room wizard.
 // Three steps: Connect → Shelf → Download. Wires together the plaintext
 // Cabinet (accounts, tokens, shelf — no encryption, no passphrase), the
-// per-platform engines, and the always-on catalog publisher. The download
-// queue pulls every book one at a time in this tab and uploads each
-// finished PDF to the public catalog.
+// per-platform engines, and the always-on catalog publisher. Connecting
+// PUBLISHES metadata only; PDFs download only when the user presses
+// Download on a row or "Download all" (background queue, one at a time).
 
 (function () {
   const F = Folio;
@@ -120,7 +120,7 @@
     actions.className = "book-actions";
     const dl = document.createElement("button");
     dl.className = "btn btn-sm btn-primary";
-    dl.textContent = "Save PDF";
+    dl.textContent = "Download";
     dl.addEventListener("click", () => doDownload(b, dl));
     const rm = document.createElement("button");
     rm.className = "btn btn-sm";
@@ -270,15 +270,11 @@
       // Cabinet rows (they carry platform + accountId — engine books don't).
       const rows = (C.data().books || []).filter((x) => x.accountId === accId);
 
-      // Catalog first (metadata rows), then queue every PDF for download.
+      // Catalog first (metadata rows). Downloads are NEVER automatic —
+      // the shelf's Download button and "Download all" start them.
       await autoPublish(rows);
-      const queued = enqueue(rows);
-      if (queued) {
-        F.dim("Queue started — " + queued + " book(s) downloading in the background.");
-        goStep(3);
-      } else {
-        goStep(2);
-      }
+      F.dim("Connect complete — nothing downloads until you ask for it.");
+      goStep(2);
     } catch (e) {
       F.err(e.message);
     }
@@ -294,7 +290,7 @@
     try {
       const n = await Folio.publish.autoPublish(fresh, (done, total, b, err) => {
         if (err) { F.log("catalog: " + (b && b.title ? "“" + b.title + "” " : "") + err, "err"); return; }
-        if (done === total) F.ok("Catalog: " + done + " title(s) listed (PDFs follow from the queue).");
+        if (done === total) F.ok("Catalog: " + done + " title(s) listed — metadata only, no PDFs downloaded.");
       });
       if (n) renderShelf();
     } catch (e) {
@@ -308,23 +304,55 @@
 
   const qKey = (b) => b.platform + ":" + b.id;
 
+  // Why this book can't run right now ("" = fine to queue).
+  function missingSessionReason(b) {
+    const d = C.data();
+    const acc = (d.accounts || []).find((a) => a.id === b.accountId);
+    if (!acc) return "account removed — reconnect it in step 01";
+    const s = d.secrets[acc.id];
+    if (!s) return "session missing — reconnect it in step 01";
+    const keyish = ["token", "cookie"].filter((k) => k in s);
+    if (keyish.length) {
+      return keyish.every((k) => !String(s[k] == null ? "" : s[k]).trim())
+        ? labelOf(b) + " session missing — reconnect it in step 01"
+        : "";
+    }
+    return Object.values(s).some((v) => String(v == null ? "" : v).trim())
+      ? ""
+      : labelOf(b) + " session missing — reconnect it in step 01";
+  }
+
+  function labelOf(b) {
+    return (ENG[b.platform] && ENG[b.platform].meta && ENG[b.platform].meta.label) || b.platform;
+  }
+
   function enqueue(books) {
     let added = 0;
+    let skipped = 0;
     for (const b of books || []) {
       const k = qKey(b);
       const pub = Folio.publish.entryFor(b);
       if (pub && pub.hasPdf) continue;
+      const reason = missingSessionReason(b);
       const old = queue.find((i) => i.key === k);
+      if (old && (old.state === "queued" || old.state === "running")) continue;
+      if (reason) {
+        // dead on arrival — show it in the queue with the reason, don't run it
+        if (old) { old.state = "error"; old.err = reason; old.b = b; }
+        else queue.push({ key: k, b, state: "error", stage: "dl", cur: 0, tot: 0, err: reason });
+        skipped++;
+        continue;
+      }
       if (old) {
-        if (old.state === "queued" || old.state === "running") continue;
-        old.state = "queued"; old.err = ""; old.cur = 0; old.tot = 0; old.b = b;
+        old.state = "queued"; old.err = ""; old.cur = 0; old.tot = 0; old.b = b; old.retry = 0;
       } else {
         queue.push({ key: k, b, state: "queued", stage: "dl", cur: 0, tot: 0, err: "" });
       }
       added++;
     }
     if (added) { renderQueue(); pump(); }
-    return added;
+    if (skipped) F.dim(skipped + " book(s) skipped — reconnect their platform in step 01.");
+    return { added, skipped };
   }
 
   function queueCounts() {
@@ -433,8 +461,10 @@
     renderQueue();
 
     if (!eng) { fail(it, "unknown platform"); return; }
-    if (!acc) { fail(it, "account is gone — reconnect it"); return; }
+    if (!acc) { fail(it, "account is gone — reconnect it in step 01"); return; }
     const secrets = C.data().secrets[acc.id];
+    const missing = missingSessionReason(b);
+    if (!secrets || missing) { fail(it, missing || "session missing — reconnect it in step 01"); return; }
 
     F.log("Folio · pulling “" + b.title + "”", "dim");
     try {
@@ -453,6 +483,15 @@
       F.ok("“" + b.title + "” stored in the catalog.");
       renderShelf();
     } catch (e) {
+      // Transient relay/edge throttling — wait out the burst window and try
+      // this book once more before giving up on it.
+      const transient = /relay HTTP (5\d\d|429)|upstream HTTP 5\d\d|relay is unreachable/.test(e.message);
+      if (transient && !it.retry) {
+        it.retry = 1;
+        F.err(e.message + " — waiting 20s, then retrying “" + b.title + "” once…");
+        await new Promise((r) => setTimeout(r, 20000));
+        return runItem(it);
+      }
       fail(it, e.message);
       if (eng.meta && eng.meta.needsRelay && !(await F.relayAvailable().catch(() => false))) {
         F.dim("Hint: this platform needs the Folio relay — deploy on Cloudflare Pages.");
@@ -495,7 +534,7 @@
     } catch (e) {
       F.err(e.message);
     }
-    if (btn) { btn.disabled = false; btn.textContent = "Save PDF"; }
+    if (btn) { btn.disabled = false; btn.textContent = "Download"; }
   }
 
   // ================= tutorial =================
@@ -533,10 +572,7 @@
         } catch (_) {}
         F.ok("“" + book.title + "” added to the shelf.");
         const row = C.data().books.find((x) => x.id === book.id && x.platform === "dibook");
-        if (row) {
-          await autoPublish([row]);
-          enqueue([row]);
-        }
+        if (row) await autoPublish([row]);
         renderShelf();
       } catch (e) { F.err(e.message); }
     });
@@ -565,16 +601,19 @@
     $("empty-connect").addEventListener("click", () => goStep(1));
     $("to-shelf").addEventListener("click", () => goStep(2));
     $("dl-all").addEventListener("click", () => {
-      const added = enqueue((C.data().books || []).filter((b) => {
+      const { added, skipped } = enqueue((C.data().books || []).filter((b) => {
         const pub = Folio.publish.entryFor(b);
         return !(pub && pub.hasPdf);
       }));
-      if (!added) { F.dim("Everything is already stored in the catalog."); return; }
+      if (!added) {
+        F.dim(skipped ? "Nothing to queue — reconnect the platforms first (step 01)." : "Everything is already stored in the catalog.");
+        return;
+      }
       goStep(3);
     });
     $("q-all").addEventListener("click", () => { enqueue(pendingBooks()); });
     $("q-retry").addEventListener("click", () => {
-      queue.forEach((i) => { if (i.state === "error") { i.state = "queued"; i.err = ""; } });
+      queue.forEach((i) => { if (i.state === "error") { i.state = "queued"; i.err = ""; i.retry = 0; } });
       renderQueue(); pump();
     });
 
