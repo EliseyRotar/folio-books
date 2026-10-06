@@ -62,7 +62,8 @@ Folio.engines.hubscuola = {
     const books = Folio.engines.hubscuola._extract(lib).map((b) => ({
       id: String(b.id),
       title: b.title,
-      cover: b.cover
+      isbn: b.isbn || "",
+      cover: Folio.engines.hubscuola._withToken(b.cover, tok)
     }));
     ctx.ok("Library loaded — " + books.length + " book(s).");
 
@@ -75,11 +76,16 @@ Folio.engines.hubscuola = {
       secrets: {
         mode: secrets.mode,
         email: secrets.mode === "email-password" ? (secrets.email || "").trim() : "",
-        token: secrets.mode === "token" ? tok : "",
+        token: tok,
         platform
       },
       books
     };
+  },
+
+  _withToken(url, tok) {
+    if (!url || !tok) return url;
+    return url + (url.includes("?") ? "&" : "?") + "tokenId=" + encodeURIComponent(tok);
   },
 
   _extract(lib) {
@@ -94,14 +100,19 @@ Folio.engines.hubscuola = {
       const rec = it.volume || it;
       const id = rec.volumeId || rec.id || rec.vid || it.volumeId || it.id || null;
       const title = it.title || rec.title || rec.coverTitle || null;
-      const cover = it.thumbnail || it.cover || rec.thumbnail || rec.cover || rec.coverImage || null;
-      if (id) out.push({ id: String(id), title: title || "Untitled", cover });
+      const cover = it.coverBig || it.thumbnail || it.cover ||
+        rec.coverBig || rec.thumbnail || rec.cover || rec.coverImage || null;
+      const isbnRaw = rec.isbn || rec.isbn13 || rec.isbn_13 || it.isbn ||
+        (rec.identifiers && (rec.identifiers.isbn13 || rec.identifiers.isbn)) || null;
+      const isbn = isbnRaw ? String(isbnRaw).replace(/[^0-9Xx]/g, "") : "";
+      if (id) out.push({ id: String(id), title: title || "Untitled", cover, isbn });
     }
     return out;
   },
 
   async download(book, s, ctx, onProgress) {
     const platform = s.platform;
+    if (!s.token) throw new Error("No session saved for this account — reconnect it first.");
     const headers = { "Token-Session": s.token, "Content-Type": "application/json" };
     let title = book.title;
 
@@ -117,7 +128,13 @@ Folio.engines.hubscuola = {
     const pubRes = await Folio.api(
       "https://ms-mms.hubscuola.it/downloadPackage/" + book.id + "/publication.zip?tokenId=" + encodeURIComponent(s.token),
       { headers });
+    if (!pubRes.ok) {
+      throw new Error("publication.zip → HTTP " + pubRes.status +
+        (pubRes.status === 401 || pubRes.status === 403
+          ? " — session expired, reconnect this account." : ""));
+    }
     const pubBuf = new Uint8Array(await pubRes.arrayBuffer());
+    if (pubBuf.byteLength < 1000) throw new Error("publication.zip is only " + pubBuf.byteLength + " B — not a real package.");
     ctx.dim("publication.zip — " + Folio.fmtBytes(pubBuf.byteLength));
 
     const zip = await JSZip.loadAsync(pubBuf);
@@ -145,7 +162,9 @@ Folio.engines.hubscuola = {
       const chUrl = "https://ms-mms.hubscuola.it/public/" + book.id + "/" + encodeURIComponent(ch.chapterId) + ".zip?tokenId=" +
         encodeURIComponent(s.token) + "&app=v2";
       ctx.dim("chapter " + (ci + 1) + "/" + chapters.length);
-      const chBuf = new Uint8Array(await (await Folio.api(chUrl, { headers })).arrayBuffer());
+      const chRes = await Folio.api(chUrl, { headers });
+      if (!chRes.ok) throw new Error("chapter " + ch.chapterId + " → HTTP " + chRes.status);
+      const chBuf = new Uint8Array(await chRes.arrayBuffer());
       const chZip = await JSZip.loadAsync(chBuf);
       const pdfs = Object.keys(chZip.files)
         .filter((n) => n.toLowerCase().endsWith(".pdf") && !chZip.files[n].dir)

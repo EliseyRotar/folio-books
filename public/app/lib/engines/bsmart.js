@@ -47,8 +47,8 @@ Folio.engines.bsmart = {
       options: { bsmart: "bsmart.it (www.bsmart.it)", digibook24: "DigiBook24 (web.digibook24.com)", custom: "Custom base domain" },
       hint: "Picked automatically for most schools. Choose Custom only if your school runs its own domain."
     },
-    { k: "base", type: "text", label: "Custom base domain", placeholder: "school.bsmart.it", depends: "custom", hint: "Used only when Site = Custom base domain." },
-    { k: "cookie", type: "password", label: "Session cookie (_bsw_session_v1_production)", hint: "Follow the tutorial above — five steps, no extensions." }
+    { k: "base", type: "text", label: "Custom base domain", placeholder: "school.bsmart.it", depends: "custom", hint: "Used only when Site = Custom base domain.", autocomplete: "off" },
+    { k: "cookie", type: "text", label: "Session cookie (_bsw_session_v1_production)", hint: "Follow the tutorial above — five steps, no extensions.", autocomplete: "off" }
   ],
 
   // per-cookie auth_token cache (in memory only, never saved to the Cabinet)
@@ -56,9 +56,9 @@ Folio.engines.bsmart = {
 
   baseOf(s) {
     const custom = (s.base || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
-    if (s.site === "custom" && custom) return custom;
+    if (s.site === "custom") return custom || "www.bsmart.it";
     if (s.site === "digibook24") return "web.digibook24.com";
-    return custom || "www.bsmart.it";
+    return "www.bsmart.it";
   },
 
   _cookieHeaders(s) {
