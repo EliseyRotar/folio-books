@@ -1,11 +1,15 @@
+# Folio — response headers (Cloudflare Pages)
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
   Permissions-Policy: browsing-topics=()
 
+# The site is edited and deployed often; assets carry an ETag, so a short
+# TTL + must-revalidate gives 304s instead of a full day of stale JS/CSS.
 /assets/*
-  Cache-Control: public, max-age=86400
-
+  Cache-Control: public, max-age=300, must-revalidate
 /lib/*
-  Cache-Control: public, max-age=3600
+  Cache-Control: public, max-age=300, must-revalidate
+/app/lib/*
+  Cache-Control: public, max-age=300, must-revalidate
