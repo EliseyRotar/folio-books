@@ -140,7 +140,7 @@ Folio.engines.bsmart = {
       isbn: b.isbn || b.ean || "",
       meta: {
         author: b.author || (b.authors && b.authors[0]) || "",
-        revision: b.current_edition && (b.current_edition.revision || b.current_edition.id)
+        revision: revOf(b.current_edition)
       }
     }));
 
@@ -162,7 +162,10 @@ Folio.engines.bsmart = {
   // paged resources -> flatten every group's assets -> page PDFs only
   async _pageAssets(info, s) {
     const base = this.baseOf(s);
-    const rev = info.current_edition.revision || info.current_edition.id;
+    // revision 0 is a real value — never use `||` here (it turned revision
+    // 0 books into ".../undefined/resources" and a hard 404).
+    const rev = revOf(info.current_edition);
+    if (rev === null) throw new Error("bSmart returned no edition revision for this book — reconnect to resync your shelf.");
     const groups = [];
     for (let page = 1; ; page++) {
       const part = await (await this._req(
@@ -246,18 +249,38 @@ Folio.engines.bsmart = {
       const a = assets[i];
       const url = /^https?:\/\//.test(a.url) ? a.url : "https://" + base + a.url;
       if (onProgress) onProgress(i, assets.length);
-      let res;
-      try {
-        // assets are fetched with no auth headers — same as the CLI
-        res = await Folio.api(url, {}, { viaProxy: true });
-      } catch (e) {
-        const host = safeHost(url);
-        throw new Error(
-          /not allowed/i.test(e.message || "")
-            ? "Asset host “" + host + "” isn’t in the relay allowlist yet — add it to functions/api/proxy.js."
-            : "Could not fetch page " + (i + 1) + " of " + assets.length + ": " + (e.message || e)
-        );
+      // gentle pacing — rapid sequential relay calls trip edge throttling
+      if (i) await new Promise((r) => setTimeout(r, 220 + Math.random() * 200));
+      // per-page retry: a relay burst that outlasts the built-in backoff
+      // shouldn't sink the whole book — wait out the window and try again.
+      let res = null;
+      let pageErr = null;
+      for (let t = 0; t < 3; t++) {
+        if (t) {
+          const wait = t * 15000;
+          ctx.log("page " + (i + 1) + "/" + assets.length + ": " + pageErr + " — waiting " + (wait / 1000) + "s, retrying…");
+          await new Promise((r) => setTimeout(r, wait));
+        }
+        try {
+          // assets are fetched with no auth headers — same as the CLI
+          res = await Folio.api(url, {}, { viaProxy: true });
+          if (res.status >= 500) {
+            pageErr = "upstream HTTP " + res.status;
+            res = null;
+            continue;
+          }
+          break;
+        } catch (e) {
+          if (/not allowed/i.test(e.message || "")) {
+            throw new Error("Asset host “" + safeHost(url) + "” isn’t in the relay allowlist yet — add it to functions/api/proxy.js.");
+          }
+          const transient = /relay HTTP (5\d\d|429)|upstream HTTP 5\d\d|relay is unreachable/.test(e.message || "");
+          if (!transient) throw e;
+          pageErr = e.message || String(e);
+          res = null;
+        }
       }
+      if (!res) throw new Error("Could not fetch page " + (i + 1) + " of " + assets.length + ": " + pageErr);
       if (res.status !== 200) throw new Error("Page " + (i + 1) + "/" + assets.length + " returned HTTP " + res.status);
       let file = new Uint8Array(await res.arrayBuffer());
       if (a.encrypted !== false) {
@@ -281,4 +304,11 @@ function shortUrl(u) {
 }
 function safeHost(u) {
   try { return new URL(u).hostname; } catch (_) { return "unknown"; }
+}
+// `revision: 0` is valid — resolve with nullish checks, never `||`.
+function revOf(ed) {
+  if (!ed) return null;
+  if (ed.revision !== undefined && ed.revision !== null) return ed.revision;
+  if (ed.id !== undefined && ed.id !== null) return ed.id;
+  return null;
 }

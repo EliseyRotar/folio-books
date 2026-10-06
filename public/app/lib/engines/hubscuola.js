@@ -21,7 +21,7 @@ Folio.engines.hubscuola = {
     { k: "mode", type: "select", label: "Access mode", options: { "email-password": "Email & password", token: "Session token" } },
     { k: "email", type: "email", label: "Email", depends: "email-password" },
     { k: "password", type: "password", label: "Password", depends: "email-password" },
-    { k: "token", type: "password", label: "Session token", depends: "token", hint: "Network → ms-api.hubscuola.it → Token-Session header" },
+    { k: "token", type: "password", label: "Session token", depends: "token", hint: "F12 → Network → any ms-api.hubscuola.it request → Request Headers → copy Token-Session." },
     { k: "platform", type: "select", label: "Platform", options: { young: "HUB Young", kids: "HUB Kids", scuola: "HUB Scuola" } }
   ],
 
@@ -33,12 +33,14 @@ Folio.engines.hubscuola = {
       ctx.log("→ Mondadori login (bce.mondadorieducation.it)");
       const u = "https://bce.mondadorieducation.it/app/mondadorieducation/login/loginJsonp?username=" +
         encodeURIComponent(secrets.email) + "&password=" + encodeURIComponent(secrets.password);
-      const res = await Folio.api(u, { headers: { Accept: "application/json" } });
-      const body = await res.json();
+      const body = await loginJson(u);
       if (body.result && body.result !== "OK") {
         throw new Error((body.error || "login rejected") + (body.data && body.data.length ? " — " + body.data : ""));
       }
       const d = body.data || {};
+      if (!d.sessionId || !d.hubEncryptedUser) {
+        throw new Error("Mondadori replied without a session — check the email and password.");
+      }
       ctx.log("→ ms-api.hubscuola.it/user/internalLogin");
       const r2 = await (await Folio.api("https://ms-api.hubscuola.it/user/internalLogin", {
         method: "POST",
@@ -180,3 +182,27 @@ Folio.engines.hubscuola = {
     return { filename: Folio.sanitizeName(title) + ".pdf", bytes };
   }
 };
+
+// Mondadori's loginJsonp normally answers JSON (content-type lies and says
+// text/html). For some accounts it throws server-side and replies with a
+// full HTML error page ("REGISTER | Errore") — retry once, then explain
+// instead of dying inside JSON.parse.
+async function loginJson(u) {
+  let lastHtmlTitle = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 1500));
+    const res = await Folio.api(u, { headers: { Accept: "application/json" } });
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      const m = text.match(/<title>([^<]*)<\/title>/i);
+      lastHtmlTitle = m ? m[1].trim() : "error page";
+    }
+  }
+  throw new Error(
+    "Mondadori’s login service answered an error page (" + lastHtmlTitle + ") instead of a reply — " +
+    "it usually means the email/password are wrong for Mondadori, or the account only logs in through its school. " +
+    "Verify them on hubscuola.it, or switch Access mode to “Session token” (F12 → Network → any ms-api.hubscuola.it request → Token-Session header)."
+  );
+}

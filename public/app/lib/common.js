@@ -36,28 +36,58 @@ F.api = async function api(url, opts = {}, { viaProxy } = {}) {
   return relay(url, opts);
 };
 
+// Global burst cooldown: Cloudflare's edge answers clusters of 503 that
+// last a few seconds. After a 5xx every relay call waits this out first so
+// queued calls don't hammer the edge while it is tripping.
+let relayFails = 0;
+let relayCoolUntil = 0;
+
 async function relay(url, opts) {
-  let res;
-  try {
-    res = await fetch(F.PROXY_HOST, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url,
-        method: opts.method || "GET",
-        headers: opts.headers || {},
-        bodyBase64: opts.body ? F.bytesToB64(opts.body) : undefined
-      })
-    });
-  } catch (_) {
-    throw new Error("The Folio relay is unreachable. Deploy on Cloudflare Pages for full coverage.");
+  // Retry 429/5xx/network failures with a growing backoff (up to ~30s of
+  // riding out a burst window); 4xx answers are permanent — surface them.
+  const delays = [800, 2000, 5000, 9000, 13000];
+  let lastErr;
+  for (let attempt = 0; ; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, delays[Math.min(attempt - 1, delays.length - 1)] + Math.random() * 500));
+    if (Date.now() < relayCoolUntil) await new Promise((r) => setTimeout(r, relayCoolUntil - Date.now()));
+    let res;
+    try {
+      res = await fetch(F.PROXY_HOST, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url,
+          method: opts.method || "GET",
+          headers: opts.headers || {},
+          bodyBase64: opts.body ? F.bytesToB64(opts.body) : undefined
+        })
+      });
+    } catch (_) {
+      lastErr = new Error("The Folio relay is unreachable. Deploy on Cloudflare Pages for full coverage.");
+      if (attempt >= delays.length) throw lastErr;
+      continue;
+    }
+    if (res.status === 429 || res.status >= 500) {
+      lastErr = new Error("relay HTTP " + res.status + " — throttled for a moment, retry shortly");
+      relayFails = Math.min(relayFails + 1, 5);
+      relayCoolUntil = Date.now() + Math.min(15000, 1000 * (1 << relayFails));
+      if (attempt >= delays.length) throw lastErr;
+      continue;
+    }
+    relayFails = 0;
+    relayCoolUntil = 0;
+    if (!res.ok) throw new Error("relay HTTP " + res.status);
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.error || "relay error " + j.status);
+    // Upstream throttling (the CDN behind the relay answering 5xx) — retry too.
+    if (j.status >= 500 && attempt < delays.length) {
+      lastErr = new Error("upstream HTTP " + j.status);
+      continue;
+    }
+    const ct = (j.headers && (j.headers["content-type"] || j.headers["Content-Type"])) || "application/octet-stream";
+    const bytes = j.dataBase64 ? F.b64ToBytes(j.dataBase64) : new Uint8Array(0);
+    return new Response(bytes, { status: j.status || 200, headers: { "content-type": ct, "x-folio-proxied": "1" } });
   }
-  if (!res.ok) throw new Error("relay HTTP " + res.status);
-  const j = await res.json();
-  if (!j.ok) throw new Error(j.error || "relay error " + j.status);
-  const ct = (j.headers && (j.headers["content-type"] || j.headers["Content-Type"])) || "application/octet-stream";
-  const bytes = j.dataBase64 ? F.b64ToBytes(j.dataBase64) : new Uint8Array(0);
-  return new Response(bytes, { status: j.status || 200, headers: { "content-type": ct, "x-folio-proxied": "1" } });
 }
 
 // Detect whether the relay is deployed on this origin (one cheap call).
