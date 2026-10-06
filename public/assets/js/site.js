@@ -21,11 +21,14 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     // current nav item (robust inside nested dirs)
-    var here = location.pathname;
+    var norm = function (p) {
+      return (p || "").replace(/\.html$/, "").replace(/\/$/, "") || "/";
+    };
+    var here = norm(location.pathname);
     document.querySelectorAll(".nav-links a").forEach(function (a) {
       try {
         var url = new URL(a.href, location.href);
-        if (url.pathname === here) a.setAttribute("aria-current", "page");
+        if (norm(url.pathname) === here) a.setAttribute("aria-current", "page");
       } catch (_) {}
     });
 
