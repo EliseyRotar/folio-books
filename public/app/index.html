@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>try{var t=localStorage.getItem("folio.theme")||(window.matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+<script>try{var t=localStorage.getItem("folio.theme")||"dark";document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 <title>Folio Reader — download your schoolbooks in the browser</title>
 <meta name="description" content="Folio Reader: connect your digital textbook accounts (HUB Scuola, MyLim, DiBooK, bSmart and more), keep them in one plaintext Cabinet and download your books as PDFs — all in the browser.">
 <meta name="keywords" content="download school books, download textbooks, ebook downloader, escolar book download, hub scuola download, mylim download, dibook download, bsmart download, scuola digitale">
@@ -14,7 +14,7 @@
 <meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../assets/css/folio.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%231c1f1d'/%3E%3Ctext x='16' y='22' font-family='Georgia' font-style='italic' font-size='20' fill='%23f6f1e6' text-anchor='middle'%3EF%3C/text%3E%3C/svg%3E">
 </head>
@@ -44,7 +44,7 @@
   <section class="hero hero-tight">
     <p class="eyebrow">Sala di lettura · the reading room</p>
     <h1>Your books, <span class="rusty">open,</span> ready to carry home.</h1>
-    <p class="lede">Three moves: connect the textbook platform you already own, look at your shelf, let Folio pull every volume down as one PDF — assembled right here in the tab. Your credentials stay in a plaintext Cabinet on <i>this</i> device, and every shelf and PDF publishes itself to the public <a href="catalog.html">Catalog</a>, anonymously and permanently.</p>
+    <p class="lede">Three moves: connect the textbook platform you already own, look at your shelf — every title lists itself in the public <a href="catalog.html">Catalog</a> as metadata right away — then press <b>Download</b> on any book, or <b>Download all</b>, and Folio assembles each one into a single PDF right here in the tab. Your credentials stay in a plaintext Cabinet on <i>this</i> device, and nothing downloads until you ask it to.</p>
   </section>
 
   <section id="desk" class="wizard" style="display:none">

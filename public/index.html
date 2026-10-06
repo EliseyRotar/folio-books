@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>try{var t=localStorage.getItem("folio.theme")||(window.matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+<script>try{var t=localStorage.getItem("folio.theme")||"dark";document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 <title>Folio — download your schoolbooks as PDFs, in the browser</title>
-<meta name="description" content="Folio downloads your digital schoolbooks (HUB Scuola, MyLim, DiBooK, bSmart and more) as PDFs straight from your browser. Accounts and tokens stay in an plaintext Cabinet on your device. Free, open source, no uploads.">
+<meta name="description" content="Folio downloads your digital schoolbooks (HUB Scuola, MyLim, DiBooK, bSmart and more) as PDFs straight from your browser. Accounts and tokens stay in a plaintext Cabinet on your device. Free, open source, no uploads.">
 <meta name="keywords" content="download schoolbooks, download textbooks as pdf, ebook downloader, digital textbook downloader, hub scuola pdf, mylim pdf, dibook pdf, bsmart pdf, scuola digitale, scaricare libri scolastici digitali">
 <meta name="author" content="Folio">
 <link rel="canonical" href="./index.html">
@@ -20,14 +20,14 @@
   "@type": "WebSite",
   "name": "Folio",
   "url": "./",
-  "description": "Download your digital schoolbooks as PDFs, in the browser, from an plaintext, per-device Cabinet.",
+  "description": "Download your digital schoolbooks as PDFs, in the browser, from a plaintext, per-device Cabinet.",
   "applicationCategory": "EducationalApplication",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
 }
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/folio.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%231c1f1d'/%3E%3Ctext x='16' y='22' font-family='Georgia' font-style='italic' font-size='20' fill='%23f6f1e6' text-anchor='middle'%3EF%3C/text%3E%3C/svg%3E">
 </head>
@@ -76,7 +76,7 @@
       <span class="num">I —</span>
       <h2>Download in the browser, today</h2>
     </div>
-    <p class="muted" style="max-width:70ch">These platforms connect straight from the Reader. Drop in your token (or, for HUB, your email and password), pick your book, and Folio reassembles it into one PDF — queued automatically for the whole shelf. Your credentials are kept in a plaintext Cabinet on your device: visible to you, never sent anywhere except to the platform you’re already signed into.</p>
+    <p class="muted" style="max-width:70ch">These platforms connect straight from the Reader. Drop in your token (or, for HUB, your email and password) and your shelf lands in the catalog as metadata right away — no PDF moves until you press Download. Your credentials are kept in a plaintext Cabinet on your device: visible to you, never sent anywhere except to the platform you’re already signed into.</p>
     <div class="cards mt-2">
       <a class="card" href="app/index.html">
         <span class="tag">HUB Scuola · Mondadori Education</span>
@@ -99,7 +99,7 @@
       <a class="card" href="app/index.html">
         <span class="tag">bSmart · Atlanti &amp; libri</span>
         <h3>bSmart <em>beta</em></h3>
-        <p>Cookie-based. Shelf syncs today; page download is in active tuning against the live backend.</p>
+        <p>Cookie-based. Shelf syncs, metadata publishes instantly, and every page assembles into one PDF in the tab.</p>
         <span class="go">Open in Reader</span>
       </a>
     </div>
@@ -143,7 +143,7 @@
         <h3>Nothing to install</h3>
         <p>No app, no account with us, no waiting room. The Reader works on any modern desktop browser.</p>
         <h3 class="mt-2">Keys stay local</h3>
-        <p>Your token and password live in a plaintext Cabinet on your own device — readable by you, kept out of every request except the byte-for-byte relay to the platform you’re already logged into. Connect once and the whole shelf downloads itself in the background, one book after another.</p>
+        <p>Your token and password live in a plaintext Cabinet on your own device — readable by you, kept out of every request except the byte-for-byte relay to the platform you’re already logged into. Connect a platform and its shelf publishes to the catalog as metadata; press Download (one book or the whole shelf) and the PDFs assemble in the background, one after another.</p>
         <h3 class="mt-2">Nothing to pay</h3>
         <p>Free hosting, free bandwidth, open source. The site is a static page; the extra relay is a standard free Cloudflare tier.</p>
       </div>
@@ -158,7 +158,7 @@
 <footer class="colophon">
   <div class="page colophon-inner">
     <div class="mono">Folio<em>.</em> — your schoolbooks, in one place</div>
-    <div class="mono">Everything runs in this tab · nothing is uploaded · MIT</div>
+    <div class="mono">Everything runs in this tab · the Cabinet stays on your device · MIT</div>
     <div class="mono"><a href="tokens.html">Keys desk →</a></div>
   </div>
 </footer>

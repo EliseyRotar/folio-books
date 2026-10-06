@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>try{var t=localStorage.getItem("folio.theme")||(window.matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+<script>try{var t=localStorage.getItem("folio.theme")||"dark";document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 <title>Keys — how to find your token, JWT or session cookie — Folio</title>
 <meta name="description" content="A plain DevTools guide to finding your session token, JWT or cookie on each schoolbook platform — HUB Scuola, MyLim, DiBooK, bSmart and more.">
 <meta name="keywords" content="session token, jwt, cookie, devtools, hub scuola token, mylim jwt, dibook jwt, bsmart cookie">
@@ -14,7 +14,7 @@
 <meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/folio.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%231c1f1d'/%3E%3Ctext x='16' y='22' font-family='Georgia' font-style='italic' font-size='20' fill='%23f6f1e6' text-anchor='middle'%3EF%3C/text%3E%3C/svg%3E">
 </head>
@@ -44,7 +44,7 @@
   <section class="hero">
     <p class="eyebrow">Rubrica · the keys desk</p>
     <h1>Your keys, <span class="rusty">where they hide.</span></h1>
-    <p class="lede">Token-hungry platforms want a key from your already-logged-in browser. Here’s exactly where each one keeps it. A token is like a password — <b>copy it once, keep it private, and only ever paste it into tools you trust</b>. Folio seals yours into an plaintext Cabinet on your own device.</p>
+    <p class="lede">Token-hungry platforms want a key from your already-logged-in browser. Here’s exactly where each one keeps it. A token is like a password — <b>copy it once, keep it private, and only ever paste it into tools you trust</b>. Folio keeps yours in a plaintext Cabinet on your own device.</p>
   </section>
 
   <section class="section">
@@ -113,7 +113,7 @@
 <footer class="colophon">
   <div class="page colophon-inner">
     <div class="mono">Folio<em>.</em> — your schoolbooks, in one place</div>
-    <div class="mono">Everything runs in this tab · nothing is uploaded · MIT</div>
+    <div class="mono">Everything runs in this tab · the Cabinet stays on your device · MIT</div>
     <div class="mono"><a href="index.html">Index →</a></div>
   </div>
 </footer>

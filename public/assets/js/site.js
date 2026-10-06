@@ -13,7 +13,7 @@
     document.documentElement.setAttribute("data-theme", theme);
     try { localStorage.setItem(KEY, theme); } catch (_) {}
     document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
-      b.textContent = theme === "dark" ? "Dark" : "Light";
+      b.textContent = theme === "dark" ? "Light" : "Dark";
       b.setAttribute("aria-label", "Switch to " + (theme === "dark" ? "light" : "dark") + " mode");
       b.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
     });
