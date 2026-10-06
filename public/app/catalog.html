@@ -106,7 +106,7 @@
       : `<div class="cat-cover" aria-hidden="true">${F.esc(initials(b.title))}</div>`;
     const who = [b.author, b.platform].filter(Boolean).map(F.esc).join(" · ") || (b.isbn ? "ISBN " + F.esc(b.isbn) : "");
     const state = b.hasPdf
-      ? `<div class="st pinned">${b.pages ? b.pages + " pages · " : ""}${F.fmtBytes(b.size || 0)}</div>`
+      ? `<div class="st pinned">${b.pages ? b.pages + (b.pages === 1 ? " page · " : " pages · ") : ""}${F.fmtBytes(b.size || 0)}</div>`
       : `<div class="st">metadata only</div>`;
     a.innerHTML =
       cover +

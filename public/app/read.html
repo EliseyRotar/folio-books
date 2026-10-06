@@ -143,7 +143,7 @@
     $("facts").innerHTML = [
       fact(book.platform),
       fact(book.isbn ? "ISBN " + book.isbn : ""),
-      fact(book.pages ? book.pages + " pages" : ""),
+      fact(book.pages ? book.pages + (book.pages === 1 ? " page" : " pages") : ""),
       fact(book.size ? F.fmtBytes(book.size) : ""),
       fact(book.publishedAt ? new Date(book.publishedAt).toLocaleDateString() : "")
     ].join("");
