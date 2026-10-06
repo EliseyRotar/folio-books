@@ -14,6 +14,9 @@ const ALLOWED_HOST = [
   /(^|\.)ms-mms\.hubscuola\.it$/i,
   /(^|\.)loescher\.it$/i,
   /(^|\.)bsmart\.it$/i,
+  /(^|\.)bsw\.it$/i,             // bSmart infrastructure / page-asset CDN
+  /(^|\.)digibook24\.com$/i,     // DigiBook24 (same shelf, other front door)
+  /(^|\.)digibook\.it$/i,
   /(^|\.)dibooklaterza\.it$/i,
   /(^|\.)pearson.*\.com$/i,
   /(^|\.)pearson\.it$/i,
