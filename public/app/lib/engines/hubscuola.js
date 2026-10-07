@@ -184,25 +184,39 @@ Folio.engines.hubscuola = {
 };
 
 // Mondadori's loginJsonp normally answers JSON (content-type lies and says
-// text/html). For some accounts it throws server-side and replies with a
-// full HTML error page ("REGISTER | Errore") — retry once, then explain
-// instead of dying inside JSON.parse.
+// text/html), but the service has two failure modes of its own:
+//   1. a full HTML error page ("REGISTER | Errore") instead of a reply;
+//   2. valid JSON whose `error` carries a Java stack trace
+//      (JsonParseException over "<!doctype html>") — their backend choking
+//      on its own upstream. Both are SERVER-side hiccups → retry a few
+//      times. Genuine rejections (wrong password, ERRLOG) return at once.
 async function loginJson(u) {
-  let lastHtmlTitle = "";
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt) await new Promise((r) => setTimeout(r, 1500));
+  const ATTEMPTS = 3;
+  let lastGlitch = "";
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 2000 * attempt));
     const res = await Folio.api(u, { headers: { Accept: "application/json" } });
     const text = await res.text();
+    let j = null;
     try {
-      return JSON.parse(text);
+      j = JSON.parse(text);
     } catch (_) {
       const m = text.match(/<title>([^<]*)<\/title>/i);
-      lastHtmlTitle = m ? m[1].trim() : "error page";
+      lastGlitch = m ? m[1].trim() : "HTML instead of JSON";
+      continue;
     }
+    if (j && j.result === "OK") return j;
+    const err = (j && j.error) || "";
+    if (/JsonParseException|<!doctype|REGISTER \| Errore|Internal Server Error|NullPointerException/i.test(err)) {
+      lastGlitch = String(err).split("\n")[0].slice(0, 140);
+      continue;
+    }
+    return j; // real answer — wrong password, unknown account, etc.
   }
   throw new Error(
-    "Mondadori’s login service answered an error page (" + lastHtmlTitle + ") instead of a reply — " +
-    "it usually means the email/password are wrong for Mondadori, or the account only logs in through its school. " +
-    "Verify them on hubscuola.it, or switch Access mode to “Session token” (F12 → Network → any ms-api.hubscuola.it request → Token-Session header)."
+    "Mondadori's login service is failing on their side (" + lastGlitch + ") — tried " +
+    ATTEMPTS + " times over a few seconds. Wait a minute and retry, or switch Access mode to " +
+    "“Session token”: log into hubscuola.it in your browser, open F12 → Network → any " +
+    "ms-api.hubscuola.it request → Request Headers → copy the Token-Session value."
   );
 }

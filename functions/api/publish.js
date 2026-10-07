@@ -55,6 +55,14 @@ async function create(context, b) {
   const db = context.env.DB;
   const title = clean(b.title, MAX_TITLE);
   if (!title) return json({ ok: false, error: "title required" }, 400);
+  const isbn = String(b.isbn == null ? "" : b.isbn).replace(/[^0-9Xx]/gi, "").slice(0, 32);
+
+  // One catalog row per book. If the same ISBN (or the same normalized
+  // title) is already listed — by another account, device or platform —
+  // report the existing row instead of inserting a duplicate. The original
+  // deleteKey is never handed out, so foreign rows stay read-only.
+  const hit = await findExisting(db, isbn, title);
+  if (hit) return json({ ok: true, id: hit.id, storage: hit.storage, hasPdf: !!hit.has_pdf, existing: true });
 
   const now = Date.now();
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
@@ -79,6 +87,29 @@ async function create(context, b) {
   ).run();
 
   return json({ ok: true, id, deleteKey, storage: context.env.BOOKS ? "r2" : "d1" });
+}
+
+// Existing row with the same ISBN, else the same title (normalized exactly
+// like the client: whitespace collapsed, lowercased).
+async function findExisting(db, isbn, title) {
+  if (isbn) {
+    const row = await db.prepare(
+      "SELECT id, has_pdf, storage FROM catalog WHERE replace(replace(lower(isbn),'-',''),' ','') = ?1 LIMIT 1"
+    ).bind(isbn.toLowerCase()).first();
+    if (row) return row;
+  }
+  const nt = normTitle(title);
+  if (!nt) return null;
+  const rows = await db.prepare(
+    "SELECT id, has_pdf, storage, title FROM catalog WHERE title <> '' LIMIT 5000"
+  ).all();
+  for (const r of rows.results || []) {
+    if (normTitle(r.title) === nt) return r;
+  }
+  return null;
+}
+function normTitle(s) {
+  return String(s || "").replace(/[\t\n\r\f\v]+/g, " ").replace(/ {2,}/g, " ").trim().toLowerCase();
 }
 
 // --- R2 parts ------------------------------------------------------------

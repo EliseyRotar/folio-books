@@ -245,11 +245,27 @@
     F.log("Folio · " + eng.meta.label, "dim");
     try {
       const { account, secrets: stored, books } = await eng.connect(secrets, ctx);
-      const accId = newId();
+      let accId = "";
+      const shelfDupes = new Set();   // platform:id already on the shelf
       C.mutate((d) => {
-        d.accounts.push(Object.assign({ id: accId, platform: key, addedAt: Date.now() }, account));
-        d.secrets[accId] = stored;
+        // Same platform + same account label already connected → reuse it
+        // (fresh secrets) instead of creating a second account row.
+        const same = d.accounts.find((x) =>
+          x.platform === key &&
+          (x.label || "") === (account.label || "") &&
+          (x.sub || "") === (account.sub || ""));
+        if (same) {
+          accId = same.id;
+          Object.assign(same, account, { id: accId });
+          d.secrets[accId] = stored;
+        } else {
+          accId = newId();
+          d.accounts.push(Object.assign({ id: accId, platform: key, addedAt: Date.now() }, account));
+          d.secrets[accId] = stored;
+        }
         for (const b of books) {
+          // one shelf row per platform+bookId — a re-connect must not duplicate
+          if (d.books.some((x) => x.platform === key && String(x.id) === String(b.id))) { shelfDupes.add(key + ":" + b.id); continue; }
           d.books.push({ id: b.id, platform: key, accountId: accId, title: b.title, cover: b.cover || "", isbn: b.isbn || "", meta: b.meta || {}, addedAt: Date.now() });
         }
       });
@@ -264,12 +280,16 @@
           });
         } catch (_) {}
       }
-      F.ok("Saved to your Cabinet. " + books.length + " book(s) on the shelf.");
+      F.ok("Saved to your Cabinet. " + (books.length - shelfDupes.size) + " new book(s)" +
+        (shelfDupes.size ? " (" + shelfDupes.size + " already on the shelf — skipped)" : "") + ".");
       renderAll();
       C.sync("push");
 
       // Cabinet rows (they carry platform + accountId — engine books don't).
-      const rows = (C.data().books || []).filter((x) => x.accountId === accId);
+      // Shelves already holding one of these books also take part, so their
+      // catalog metadata gets (re)published if a previous session missed it.
+      const rows = (C.data().books || []).filter((x) =>
+        x.accountId === accId || shelfDupes.has(x.platform + ":" + x.id));
 
       // Catalog metadata first, then quietly harvest every PDF in the
       // background — no step-hop, no per-book chatter; the queue chip is
@@ -328,8 +348,7 @@
       if (queue.some((i) => i.key === r.k)) continue;
       const b = books.find((x) => qKey(x) === r.k);
       if (!b) continue;
-      const pub = Folio.publish.entryFor(b);
-      if (pub && pub.hasPdf) continue; // already harvested elsewhere
+      if (!harvestable(b)) continue; // stored, or a shared catalog entry
       const dead = missingSessionReason(b);
       if (r.s === "error" && dead) {
         queue.push({ key: r.k, b, state: "error", stage: "dl", cur: 0, tot: 0, err: r.e || dead, bg: !!r.bg });
@@ -370,14 +389,24 @@
     return (ENG[b.platform] && ENG[b.platform].meta && ENG[b.platform].meta.label) || b.platform;
   }
 
+  // Should this book be downloaded/published at all?
+  //   * catalog copy already has the PDF → nothing to do;
+  //   * catalog entry belongs to another session (no deleteKey) → the book
+  //     is already listed; never re-add or re-upload it (dedup rule).
+  function harvestable(b) {
+    const pub = Folio.publish.entryFor(b);
+    if (!pub) return true;
+    if (pub.hasPdf) return false;
+    return !!pub.deleteKey;
+  }
+
   function enqueue(books, opts) {
     const bg = !!(opts && opts.bg);
     let added = 0;
     let skipped = 0;
     for (const b of books || []) {
       const k = qKey(b);
-      const pub = Folio.publish.entryFor(b);
-      if (pub && pub.hasPdf) continue;
+      if (!harvestable(b)) continue;
       const reason = missingSessionReason(b);
       const old = queue.find((i) => i.key === k);
       if (old && (old.state === "queued" || old.state === "running")) continue;
@@ -418,8 +447,7 @@
 
   function pendingBooks() {
     return (C.data().books || []).filter((b) => {
-      const pub = Folio.publish.entryFor(b);
-      if (pub && pub.hasPdf) return false;
+      if (!harvestable(b)) return false;
       return !queue.some((i) => i.key === qKey(b) && (i.state === "queued" || i.state === "running"));
     });
   }
@@ -528,18 +556,23 @@
       if (!it.bg) F.dim("Catalog: uploading " + filename + " (" + F.fmtBytes(bytes.byteLength) + ")…");
       const upload = () => Folio.publish.publishPdf(b, bytes, filename, pages || (b.meta && b.meta.count) || 0,
         (c, t) => { it.cur = c; it.tot = t; paintRow(it); });
+      let rec;
       try {
-        await upload();
+        rec = await upload();
       } catch (e) {
         // a dropped connection mid-upload must not throw away the download
         if (!/Failed to fetch|NetworkError|publish failed|\((408|425|429|5\d\d)\)/.test(e.message || "")) throw e;
         F.err("upload interrupted (" + e.message + ") — retrying the upload in 15s…");
         await new Promise((r) => setTimeout(r, 15000));
-        await upload();
+        rec = await upload();
       }
 
       it.state = "done";
-      if (!it.bg) F.ok("“" + b.title + "” stored in the catalog.");
+      if (rec && !rec.deleteKey && !rec.hasPdf) {
+        if (!it.bg) F.dim("“" + b.title + "” is already listed in the catalog by another session — upload skipped.");
+      } else if (!it.bg) {
+        F.ok("“" + b.title + "” stored in the catalog.");
+      }
       renderShelf();
     } catch (e) {
       // Transient relay/edge throttling — wait out the burst window and try
@@ -583,8 +616,12 @@
       if (bytes) {
         F.dim("Catalog: uploading…");
         try {
-          await Folio.publish.publishPdf(b, bytes, filename, pages || 0);
-          F.ok("“" + b.title + "” stored in the catalog.");
+          const rec = await Folio.publish.publishPdf(b, bytes, filename, pages || 0);
+          if (rec && !rec.deleteKey && !rec.hasPdf) {
+            F.dim("“" + b.title + "” is already listed in the catalog by another session — upload skipped.");
+          } else {
+            F.ok("“" + b.title + "” stored in the catalog.");
+          }
         } catch (e) {
           F.log("catalog upload failed: " + e.message, "err");
         }
@@ -661,10 +698,7 @@
     $("to-shelf").addEventListener("click", () => goStep(2));
     $("queue-chip").addEventListener("click", () => goStep(3));
     $("dl-all").addEventListener("click", () => {
-      const { added, skipped } = enqueue((C.data().books || []).filter((b) => {
-        const pub = Folio.publish.entryFor(b);
-        return !(pub && pub.hasPdf);
-      }));
+      const { added, skipped } = enqueue((C.data().books || []).filter((b) => harvestable(b)));
       if (!added) {
         F.dim(skipped ? "Nothing to queue — reconnect the platforms first (step 01)." : "Everything is already stored in the catalog.");
         return;

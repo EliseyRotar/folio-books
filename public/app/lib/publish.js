@@ -29,12 +29,35 @@
   }
   function bk(b) { return b.platform + ":" + b.id; }
 
+  // Same normalizers the server runs — ISBN digits only, title lowercased
+  // with whitespace collapsed, so client and server agree on "same book".
+  function normIsbn(s) { return String(s || "").replace(/[^0-9Xx]/gi, ""); }
+  function normTitle(s) {
+    return String(s || "").replace(/[\t\n\r\f\v]+/g, " ").replace(/ {2,}/g, " ").trim().toLowerCase();
+  }
+
   PUB.entryFor = function entryFor(b) { return readMap()[bk(b)] || null; };
 
   function remember(b, rec) {
     const m = readMap();
     m[bk(b)] = rec;
     writeMap(m);
+  }
+
+  // Has this device already published the same book under another key?
+  function findLocalDup(b) {
+    const isbn = normIsbn(b.isbn);
+    const title = normTitle(b.title);
+    if (!isbn && !title) return null;
+    const m = readMap();
+    for (const k in m) {
+      if (k === bk(b)) continue;
+      const r = m[k];
+      if (!r || !r.id) continue;
+      if (isbn && r.isbn && normIsbn(r.isbn) === isbn) return r;
+      if (title && r.title && normTitle(r.title) === title) return r;
+    }
+    return null;
   }
 
   // ----- HTTP ----------------------------------------------------------
@@ -62,10 +85,24 @@
 
   // ----- metadata ------------------------------------------------------
   // One row per book. Cheap, runs on connect for every title on the shelf.
+  // Dedup happens twice: locally (this device already listed the same
+  // ISBN/title under another key) and on the server (another account or
+  // device listed it first). Either way the caller gets the EXISTING row —
+  // without its deleteKey when it isn't ours — so nothing is ever added twice.
   PUB.publishMeta = async function publishMeta(b, force) {
     const key = bk(b);
-    const existing = readMap()[key];
+    const map = readMap();
+    const existing = map[key];
     if (existing && !force) return existing;
+
+    if (!force) {
+      const dup = findLocalDup(b);
+      if (dup) {
+        const rec = Object.assign({}, dup, { isbn: normIsbn(b.isbn), title: normTitle(b.title) });
+        remember(b, rec);
+        return rec;
+      }
+    }
 
     const rec = await api("create", {
       title: b.title || "Untitled",
@@ -76,7 +113,15 @@
       filename: "",
       pages: (b.meta && b.meta.count) || 0
     });
-    remember(b, { id: rec.id, deleteKey: rec.deleteKey, hasPdf: false, storage: rec.storage });
+    const stamp = { isbn: normIsbn(b.isbn), title: normTitle(b.title || "Untitled") };
+    if (rec.existing) {
+      // already in the catalog (someone else got there first) — keep the
+      // reference, but no deleteKey: foreign rows are read-only to us.
+      const shared = { id: rec.id, deleteKey: "", hasPdf: !!rec.hasPdf, storage: rec.storage };
+      remember(b, Object.assign(shared, stamp));
+    } else {
+      remember(b, Object.assign({ id: rec.id, deleteKey: rec.deleteKey, hasPdf: false, storage: rec.storage }, stamp));
+    }
     _storage = rec.storage || _storage;
     return readMap()[key];
   };
@@ -99,10 +144,23 @@
     let rec = readMap()[bk(b)];
     if (!rec) rec = await PUB.publishMeta(b, true);
     if (!rec) return null;
+    // Shared catalog entry (listed by another session): read-only. Never
+    // upload into someone else's row and never create a second one.
+    if (!rec.deleteKey) return rec;
 
     const store = await PUB.storage();
-    if (store === "r2") await uploadR2(rec, buf, filename, pages, onProgress);
-    else await uploadD1(rec, buf, pages, onProgress);
+    try {
+      await doUpload(store, rec, buf, filename, pages, onProgress);
+    } catch (e) {
+      if (!/not found|404/.test(e.message || "")) throw e;
+      // the row was deleted elsewhere — republish fresh and try once more
+      const stale = readMap();
+      delete stale[bk(b)];
+      writeMap(stale);
+      rec = await PUB.publishMeta(b, true);
+      if (!rec || !rec.deleteKey) throw e;
+      await doUpload(store, rec, buf, filename, pages, onProgress);
+    }
 
     const m = readMap();
     const cur = m[bk(b)] || rec;
@@ -113,6 +171,11 @@
     writeMap(m);
     return cur;
   };
+
+  async function doUpload(store, rec, buf, filename, pages, onProgress) {
+    if (store === "r2") await uploadR2(rec, buf, filename, pages, onProgress);
+    else await uploadD1(rec, buf, pages, onProgress);
+  }
 
   async function uploadR2(rec, buf, filename, pages, onProgress) {
     const total = Math.ceil(buf.length / R2_PART) || 1;
