@@ -13,4 +13,10 @@ binding = "DB"
 database_name = "folio"
 database_id = "689a5b45-e3db-4964-9010-92f0b79595d0"
 
+# R2 bucket for harvested + published PDFs (10 GB free tier — enqueue
+# endpoint hard-caps the harvest queue at 9 GB).
+[[r2_buckets]]
+binding = "BOOKS"
+bucket_name = "folio-pdfs"
+
 [vars]

@@ -10,7 +10,6 @@ import os
 import sys
 import time
 
-import boto3
 import requests
 
 import hub
@@ -18,11 +17,7 @@ import hub
 API = os.environ["HARVEST_API"].rstrip("/")
 PUBLISH = API.replace("/api/harvest", "/api/publish")
 TOKEN = os.environ["HARVEST_TOKEN"]
-R2_ENDPOINT = os.environ.get("R2_ENDPOINT", "")
-R2_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
-R2_SECRET = os.environ.get("R2_SECRET_ACCESS_KEY", "")
-R2_BUCKET = os.environ.get("R2_BUCKET", "")
-PART = 28 * 1024 * 1024  # < 32 MB R2 part ceiling
+PART = 28 * 1024 * 1024  # < 30 MB part ceiling enforced by the endpoint
 
 
 def api(method: str, action: str, body: dict | None = None, raw: bool = False):
@@ -38,20 +33,7 @@ def api(method: str, action: str, body: dict | None = None, raw: bool = False):
     return r if raw else r.json()
 
 
-def s3():
-    return boto3.client(
-        "s3",
-        endpoint_url=R2_ENDPOINT,
-        aws_access_key_id=R2_KEY_ID,
-        aws_secret_access_key=R2_SECRET,
-        region_name="auto",
-    )
-
-
 def publish_and_upload(job: dict, pdf: bytes, pages: int) -> dict:
-    if not (R2_ENDPOINT and R2_BUCKET and R2_KEY_ID):
-        raise RuntimeError("R2 not configured in this runner")
-
     filename = (job.get("title") or job["book_id"]).replace("/", "-")[:150] + ".pdf"
     created = requests.post(
         f"{PUBLISH}?step=create",
@@ -73,11 +55,18 @@ def publish_and_upload(job: dict, pdf: bytes, pages: int) -> dict:
     if created.get("existing") and not delete_key:
         raise RuntimeError("catalog already lists this book without a PDF and without our deleteKey")
 
-    client = s3()
     chunks = 0
     for idx, off in enumerate(range(0, len(pdf), PART)):
         part = pdf[off : off + PART]
-        client.put_object(Bucket=R2_BUCKET, Key=f"book/{book_id}/{idx}", Body=part)
+        r = requests.post(
+            f"{API}?action=up&job={job['id']}&id={book_id}&idx={idx}&key={delete_key}",
+            headers={"x-harvest-token": TOKEN},
+            data=part,
+            timeout=300,
+        )
+        r.raise_for_status()
+        if not r.json().get("ok"):
+            raise RuntimeError("part upload failed: " + r.text[:200])
         chunks += 1
 
     sealed = requests.post(
@@ -114,9 +103,6 @@ def process(job: dict) -> None:
 
 
 def main() -> int:
-    if not (R2_ENDPOINT and R2_BUCKET and R2_KEY_ID and R2_SECRET):
-        print("R2 not configured in this runner — nothing to do", flush=True)
-        return 0
     deadline = time.time() + 14 * 60  # stay inside the runner's 15-min budget
     while time.time() < deadline:
         jobs = api("POST", "claim", {"limit": 2}).get("jobs") or []

@@ -20,6 +20,8 @@ const CAP_BYTES = 9 * 1024 * 1024 * 1024; // 9 GiB — headroom under R2's 10 GB
 const MAX_TITLE = 300;
 const MAX_SECRETS = 8000;
 const MAX_ATTEMPTS = 3;
+const MAX_PART = 30 * 1024 * 1024; // R2 part ceiling in publish.js is 32 MB
+const MAX_PARTS = 64;              // 64 x 30 MB = ~1.9 GB per book
 
 export async function onRequestPost(context) {
   const auth = await checkAuth(context);
@@ -29,6 +31,9 @@ export async function onRequestPost(context) {
   const action = url.searchParams.get("action") || "";
   const db = context.env.DB;
   if (!db) return json({ ok: false, error: "D1 not bound" }, 500);
+
+  // binary part upload — raw body, no JSON parse
+  if (action === "up") return upPart(context, db, url);
 
   let body = {};
   try { body = await context.request.json(); } catch (_) {}
@@ -171,6 +176,37 @@ async function complete(db, b) {
     "UPDATE harvest_jobs SET state='queued', error=?2, updated_at=?3 WHERE id=?1"
   ).bind(id, error, now).run();
   return json({ ok: true, id, state: "queued", attempts });
+}
+
+// --- part upload (runner -> R2 via Pages Function, one secret total) ----
+async function upPart(context, db, url) {
+  const books = context.env.BOOKS;
+  if (!books) return json({ ok: false, error: "R2 not bound" }, 500);
+
+  const jobId = (url.searchParams.get("job") || "").slice(0, 40);
+  const catalogId = (url.searchParams.get("id") || "").slice(0, 40);
+  const idx = Number(url.searchParams.get("idx"));
+  const key = String(url.searchParams.get("key") || "").slice(0, 64);
+  const len = Number(context.request.headers.get("content-length") || 0);
+
+  if (!jobId || !catalogId || !key) return json({ ok: false, error: "job + id + key required" }, 400);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= MAX_PARTS) return json({ ok: false, error: "bad index" }, 400);
+  if (len && len > MAX_PART) return json({ ok: false, error: "part too large" }, 413);
+
+  // the job must be ours and in flight
+  const job = await db.prepare("SELECT state FROM harvest_jobs WHERE id = ?").bind(jobId).first();
+  if (!job) return json({ ok: false, error: "job not found" }, 404);
+  if (job.state !== "running") return json({ ok: false, error: "job not running" }, 409);
+
+  // and the catalog row must match what the runner was given
+  const row = await db.prepare("SELECT delete_key FROM catalog WHERE id = ?").bind(catalogId).first();
+  if (!row || row.delete_key !== key) return json({ ok: false, error: "bad catalog key" }, 403);
+  if (!context.request.body) return json({ ok: false, error: "empty body" }, 400);
+
+  await books.put("book/" + catalogId + "/" + idx, context.request.body, {
+    httpMetadata: { contentType: "application/octet-stream" }
+  });
+  return json({ ok: true, id: catalogId, idx });
 }
 
 function json(obj, status = 200) {
