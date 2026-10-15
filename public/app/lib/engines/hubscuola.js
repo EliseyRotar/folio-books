@@ -31,7 +31,9 @@ Folio.engines.hubscuola = {
 
     if (secrets.mode === "email-password") {
       ctx.log("→ Mondadori login (bce.mondadorieducation.it)");
-      const u = "https://bce.mondadorieducation.it/app/mondadorieducation/login/loginJsonp?username=" +
+      // exact shape of the working reference (vvettoretti/hubscuola-downloader):
+      // double slash after the host, Accept: */*, nothing else.
+      const u = "https://bce.mondadorieducation.it//app/mondadorieducation/login/loginJsonp?username=" +
         encodeURIComponent(secrets.email) + "&password=" + encodeURIComponent(secrets.password);
       const body = await loginJson(u);
       if (body.result && body.result !== "OK") {
@@ -191,11 +193,11 @@ Folio.engines.hubscuola = {
 //      on its own upstream. Both are SERVER-side hiccups → retry a few
 //      times. Genuine rejections (wrong password, ERRLOG) return at once.
 async function loginJson(u) {
-  const ATTEMPTS = 3;
+  const ATTEMPTS = 5;
   let lastGlitch = "";
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     if (attempt) await new Promise((r) => setTimeout(r, 2000 * attempt));
-    const res = await Folio.api(u, { headers: { Accept: "application/json" } });
+    const res = await Folio.api(u, { headers: { Accept: "*/*" } });
     const text = await res.text();
     let j = null;
     try {
