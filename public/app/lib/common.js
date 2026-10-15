@@ -193,12 +193,16 @@ F.coverPh = function coverPh(phClass) {
 };
 
 // ISBN -> ordered https candidates (no API keys, all hotlinkable).
+// First: the same-origin resolver (Google Books by exact ISBN → Open
+// Library, edge-cached) — it hits the right edition instead of a title
+// guess. The direct hosts stay as fallbacks.
 F.staticCovers = function staticCovers(isbn) {
   const id = String(isbn || "").replace(/[^0-9Xx]/g, "");
   if (id.length !== 10 && id.length !== 13) return [];
   const isbn13 = id.length === 13 ? id : isbn13of(id);
   const isbn10 = id.length === 10 ? id : isbn10of(id);
   const out = [
+    "/api/cover?isbn=" + isbn13 + "&img=1",
     "https://covers.openlibrary.org/b/isbn/" + isbn13 + "-L.jpg?default=false",
     isbn10 ? "https://images-na.ssl-images-amazon.com/images/P/" + isbn10 + ".01.LZZZZZZZ.jpg" : "",
     isbn10 ? "https://books.google.com/books/content?vid=ISBN" + isbn10 + "&printsec=frontcover&img=1&zoom=2" : "",

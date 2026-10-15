@@ -13,6 +13,7 @@
 
   const $ = (id) => document.getElementById(id);
   const newId = () => "a_" + (crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : String(Math.random()).slice(2, 10));
+  const i18n = () => (window.I18N && window.I18N.t) || ((x) => x);
 
   const ctx = {
     log: (t, c) => F.log(t, c),
@@ -71,7 +72,7 @@
          <button class="btn btn-sm" data-rm="${a.id}">Forget</button>
        </div>`;
     dl.querySelector("[data-rm]").addEventListener("click", () => {
-      if (!confirm("Remove this account and erase its saved credentials from your Cabinet?")) return;
+      if (!confirm(i18n()("Remove this account and erase its saved credentials from your Cabinet?"))) return;
       C.mutate((d) => {
         d.accounts = d.accounts.filter((x) => x.id !== a.id);
         delete d.secrets[a.id];
