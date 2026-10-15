@@ -106,7 +106,7 @@
   </section>
 
   <section class="section">
-    <div class="warn"><b>Handle with care.</b> A token is a live credential. What follows in Folio runs where you are: your keys sit in a plaintext Cabinet on your device, and the only network traffic carrying them is the relay to the platform you’re already logged into. Anyone asking you to upload a token to a server is a scam — a real downloader always runs <i>where you are</i>.</div>
+    <div class="warn"><b>Handle with care.</b> A token is a live credential. By default everything in Folio runs where you are: your keys sit in a plaintext Cabinet on your device, and the only network traffic carrying them is the relay to the platform you’re already logged into. There is one opt-in exception — the background harvester. When you send a book to it, that book’s credentials travel once to Folio’s own private job queue, a free GitHub Actions runner downloads the book, the PDF goes to your library storage (hard-capped at 9 GB), and the credentials are deleted the moment the job finishes. Nothing else ever leaves your device.</div>
   </section>
 
 </main>
