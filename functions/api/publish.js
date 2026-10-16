@@ -75,7 +75,7 @@ async function create(context, b) {
   ).bind(
     id,
     title,
-    clean(b.author, MAX_TEXT),
+    clean(authorText(b.author), MAX_TEXT),
     clean(b.isbn, 32),
     clean(b.platform, 40),
     cover(b.cover),
@@ -245,6 +245,13 @@ async function remove(context, b) {
 function clean(v, max) {
   const s = String(v == null ? "" : v).trim().slice(0, max);
   return s;
+}
+function authorText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v.map(authorText).filter(Boolean).join(", ");
+  if (typeof v === "object") return authorText(v.name || v.fullName || v.value || v.label || "");
+  return String(v);
 }
 function cover(v) {
   const s = String(v == null ? "" : v).trim();

@@ -28,6 +28,13 @@
     try { localStorage.setItem(LS_KEY, JSON.stringify(m)); } catch (_) {}
   }
   function bk(b) { return b.platform + ":" + b.id; }
+  function authorText(v) {
+    if (v == null) return "";
+    if (typeof v === "string") return v;
+    if (Array.isArray(v)) return v.map(authorText).filter(Boolean).join(", ");
+    if (typeof v === "object") return authorText(v.name || v.fullName || v.value || v.label || "");
+    return String(v);
+  }
 
   // Same normalizers the server runs — ISBN digits only, title lowercased
   // with whitespace collapsed, so client and server agree on "same book".
@@ -106,7 +113,7 @@
 
     const rec = await api("create", {
       title: b.title || "Untitled",
-      author: (b.meta && (b.meta.author || b.meta.authors)) || "",
+      author: authorText(b.meta && (b.meta.author || b.meta.authors)),
       isbn: b.isbn || "",
       platform: b.platform || "",
       cover: coverOf(b),

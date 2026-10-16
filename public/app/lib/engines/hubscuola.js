@@ -67,6 +67,7 @@ Folio.engines.hubscuola = {
       id: String(b.id),
       title: b.title,
       isbn: b.isbn || "",
+      platform: "hubscuola",
       cover: Folio.engines.hubscuola._withToken(b.cover, tok)
     }));
     ctx.ok("Library loaded — " + books.length + " book(s).");
