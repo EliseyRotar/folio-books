@@ -408,14 +408,14 @@
   function cloudEnqueue(b) {
     let key = "";
     try { key = localStorage.getItem("folio.harvestKey") || ""; } catch (_) {}
-    if (!key || b.platform !== "hubscuola") return;
+    if (!key || (b.platform !== "hubscuola" && b.platform !== "bsmart")) return;
     const acc = (C.data().accounts || []).find((a) => a.id === b.accountId);
     const secrets = acc && (C.data().secrets || {})[acc.id];
     if (!secrets) return;
     fetch("/api/harvest?action=enqueue", {
       method: "POST",
       headers: { "content-type": "application/json", "x-harvest-token": key },
-      body: JSON.stringify({ platform: "hubscuola", bookId: String(b.id), title: b.title || "", secrets })
+      body: JSON.stringify({ platform: b.platform, bookId: String(b.id), title: b.title || "", secrets })
     }).catch(() => {});
   }
 

@@ -162,8 +162,9 @@
     try {
       await doUpload(store, rec, buf, filename, pages, onProgress);
     } catch (e) {
-      if (!/not found|404/.test(e.message || "")) throw e;
-      // the row was deleted elsewhere — republish fresh and try once more
+      if (!/not found|404|bad deleteKey/.test(e.message || "")) throw e;
+      // the row was deleted elsewhere — or the background harvester adopted
+      // it and rotated the key. Republish fresh (server dedups) and retry once.
       const stale = readMap();
       delete stale[bk(b)];
       writeMap(stale);

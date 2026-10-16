@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install deps
-        run: pip install -q requests pypdf
+        run: pip install -q requests pypdf msgpack cryptography
       - name: Drain harvest queue
         env:
           HARVEST_API: https://folio-books.pages.dev/api/harvest

@@ -56,7 +56,7 @@ def download(book_id: str, token: str, platform: str = "young") -> bytes:
     try:
         row = con.execute(
             "SELECT offline_value FROM offline_tbl WHERE offline_path=?",
-            (f"meyoung/publication/{book_id}",),
+            (f"me{platform}/publication/{book_id}",),
         ).fetchone()
     finally:
         con.close()
@@ -82,7 +82,40 @@ def download(book_id: str, token: str, platform: str = "young") -> bytes:
     return out.getvalue(), pages
 
 
-def run(job: dict) -> tuple[bytes, int]:
+def library_cover(book_id: str, token: str, platform: str) -> str:
+    """coverBig/thumbnail/cover for one volume from getLibrary (public CDN)."""
+    session = requests.Session()
+    session.headers["user-agent"] = UA
+    session.headers["token-session"] = token
+    lib = session.get(
+        f"https://ms-api.hubscuola.it/getLibrary/{platform}", timeout=60
+    ).json()
+
+    def first_arr(o):
+        while o and isinstance(o, dict):
+            keys = [k for k, v in o.items() if isinstance(v, list)]
+            if not keys:
+                break
+            o = o[keys[0]]
+        return o if isinstance(o, list) else []
+
+    for it in first_arr(lib):
+        # `volume` is sometimes a bare id string, not an object — fall back
+        # to the item itself exactly like the JS engine does
+        vol = it.get("volume")
+        rec = vol if isinstance(vol, dict) else it
+        rid = rec.get("volumeId") or rec.get("id") or rec.get("vid") or it.get("volumeId") or it.get("id")
+        if str(rid) != str(book_id):
+            continue
+        return str(
+            it.get("coverBig") or it.get("thumbnail") or it.get("cover")
+            or rec.get("coverBig") or rec.get("thumbnail") or rec.get("cover")
+            or rec.get("coverImage") or ""
+        )
+    return ""
+
+
+def run(job: dict) -> tuple[bytes, int, str]:
     secrets = json.loads(job.get("secrets") or "{}")
     token = (secrets.get("token") or "").strip()
     session = requests.Session()
@@ -94,4 +127,9 @@ def run(job: dict) -> tuple[bytes, int]:
             raise RuntimeError("job has neither token nor email/password")
         token = login(email, password, session)
     platform = (secrets.get("platform") or job.get("platform") or "young").lower()
-    return download(job["book_id"], token, platform)
+    pdf, pages = download(job["book_id"], token, platform)
+    try:
+        cover = library_cover(job["book_id"], token, platform)
+    except Exception:  # noqa: BLE001 — a missing cover must never sink the book
+        cover = ""
+    return pdf, pages, cover

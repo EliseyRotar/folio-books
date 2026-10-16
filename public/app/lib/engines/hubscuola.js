@@ -68,7 +68,9 @@ Folio.engines.hubscuola = {
       title: b.title,
       isbn: b.isbn || "",
       platform: "hubscuola",
-      cover: Folio.engines.hubscuola._withToken(b.cover, tok)
+      // public CDN URL — never append the session tokenId: covers that
+      // reach the catalog must not carry credentials
+      cover: b.cover || ""
     }));
     ctx.ok("Library loaded — " + books.length + " book(s).");
 
@@ -86,11 +88,6 @@ Folio.engines.hubscuola = {
       },
       books
     };
-  },
-
-  _withToken(url, tok) {
-    if (!url || !tok) return url;
-    return url + (url.includes("?") ? "&" : "?") + "tokenId=" + encodeURIComponent(tok);
   },
 
   _extract(lib) {

@@ -134,6 +134,8 @@ async function enqueue(db, b) {
 async function adopt(db, b) {
   const isbn = String(b.isbn || "").replace(/[^0-9Xx]/gi, "").slice(0, 32);
   const title = String(b.title || "").trim().slice(0, MAX_TITLE);
+  const coverIn = String(b.cover || "").trim();
+  const cover = /^https:\/\//.test(coverIn) && coverIn.length <= 2000 ? coverIn : "";
 
   let row = null;
   if (isbn) {
@@ -155,8 +157,10 @@ async function adopt(db, b) {
 
   const deleteKey = crypto.randomUUID().replace(/-/g, "");
   await db.prepare(
-    "UPDATE catalog SET delete_key = ?1, updated_at = ?2 WHERE id = ?3"
-  ).bind(deleteKey, Date.now(), row.id).run();
+    `UPDATE catalog SET delete_key = ?1, updated_at = ?2,
+                        cover = CASE WHEN cover = '' AND ?4 <> '' THEN ?4 ELSE cover END
+     WHERE id = ?3`
+  ).bind(deleteKey, Date.now(), row.id, cover).run();
   return json({ ok: true, id: row.id, deleteKey });
 }
 

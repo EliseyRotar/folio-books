@@ -12,6 +12,7 @@ import time
 
 import requests
 
+import bsmart
 import hub
 
 API = os.environ["HARVEST_API"].rstrip("/")
@@ -33,13 +34,15 @@ def api(method: str, action: str, body: dict | None = None, raw: bool = False):
     return r if raw else r.json()
 
 
-def publish_and_upload(job: dict, pdf: bytes, pages: int) -> dict:
+def publish_and_upload(job: dict, pdf: bytes, pages: int, cover: str = "") -> dict:
+    platform = job.get("platform") or "hubscuola"
     filename = (job.get("title") or job["book_id"]).replace("/", "-")[:150] + ".pdf"
     created = requests.post(
         f"{PUBLISH}?step=create",
         json={
             "title": job.get("title") or job["book_id"],
-            "platform": "hubscuola",
+            "platform": platform,
+            "cover": cover,
             "filename": filename,
             "pages": pages,
         },
@@ -54,7 +57,7 @@ def publish_and_upload(job: dict, pdf: bytes, pages: int) -> dict:
         return {"catalogId": book_id, "size": 0, "key": "", "already": True}
     if created.get("existing") and not delete_key:
         # metadata-only row published by a device shelf sync — take it over
-        adopted = api("POST", "adopt", {"title": job.get("title", "")})
+        adopted = api("POST", "adopt", {"title": job.get("title", ""), "cover": cover})
         if not adopted.get("ok"):
             raise RuntimeError("catalog already lists this book and cannot be adopted: " + adopted.get("error", ""))
         book_id = adopted["id"]
@@ -94,8 +97,9 @@ def publish_and_upload(job: dict, pdf: bytes, pages: int) -> dict:
 def process(job: dict) -> None:
     print(f"→ {job['id']} {job.get('title') or job['book_id']} ({job['platform']})", flush=True)
     try:
-        pdf, pages = hub.run(job)
-        result = publish_and_upload(job, pdf, pages)
+        engine = bsmart if (job.get("platform") or "").lower() == "bsmart" else hub
+        pdf, pages, cover = engine.run(job)
+        result = publish_and_upload(job, pdf, pages, cover)
         api(
             "POST",
             "complete",
