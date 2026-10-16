@@ -708,5 +708,9 @@ Object.assign(window.FOLIO_IT, {
   "Hint: this platform isn’t available yet.": "Suggerimento: questa piattaforma non è ancora disponibile.",
   "Couldn’t reach the platform. Try again in a moment.": "Impossibile contattare la piattaforma. Riprova tra un attimo.",
   "Educadhoc · preparing “{t}”…": "Educadhoc · preparazione di “{t}”…",
-  "→ fetching the book package ({id})": "→ recupero del pacchetto del libro ({id})"
+  "→ fetching the book package ({id})": "→ recupero del pacchetto del libro ({id})",
+  "Reading copy": "Copia di lettura",
+  "reading copy": "copia di lettura",
+  "Catalog →": "Catalog →"
 });
+
