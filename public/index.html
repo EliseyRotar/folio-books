@@ -61,8 +61,8 @@
     <h1>One shelf for <span class="rusty">every</span> textbook you own.</h1>
     <p class="lede">Folio gathers the digital textbooks you already own — HUB Scuola, MyLim, DiBooK, bSmart and more — into one simple library. Connect your account once, open your shelf, and press <b>Read</b> on any book: it opens right here in the browser, and Folio remembers where you stopped. Your login stays on your device.</p>
     <p class="mt-2">
-      <a class="btn btn-primary" href="app/index.html">Open the Reader →</a>
-      <a class="btn" href="platforms.html">See all platforms</a>
+      <a class="btn btn-primary" href="app/catalog.html">Open the Catalog →</a>
+      <a class="btn" href="app/index.html">Open the Reader</a>
     </p>
   </section>
 
@@ -71,6 +71,19 @@
     <div class="stat"><div class="n">3</div><div class="l">steps: connect, shelf, read</div></div>
     <div class="stat"><div class="n">1</div><div class="l">library for every platform</div></div>
     <div class="stat"><div class="n">€0</div><div class="l">for everyone, forever</div></div>
+  </section>
+
+  <section class="section" id="shelf">
+    <div class="section-head">
+      <span class="num">Gratis —</span>
+      <h2>The catalog is open</h2>
+    </div>
+    <p class="muted" style="max-width:70ch">No account needed — the books are already waiting in the catalog. Open any of them and start reading right here in your browser, for free.</p>
+    <div class="shelf-strip" id="shelf-strip" hidden></div>
+    <p class="small muted mt-2" id="shelf-fallback">Loading the catalog…</p>
+    <p class="mt-2">
+      <a class="btn btn-primary" id="shelf-browse" href="app/catalog.html">Browse the catalog →</a>
+    </p>
   </section>
 
   <section class="section">
@@ -161,10 +174,55 @@
   <div class="page colophon-inner">
     <div class="mono">Folio<em>.</em> — your schoolbooks, in one place</div>
     <div class="mono">Read in your browser · your login stays on your device · MIT</div>
-    <div class="mono"><a href="tokens.html">Keys desk →</a></div>
+    <div class="mono"><a href="app/catalog.html">Catalog →</a> · <a href="tokens.html">Keys desk →</a></div>
   </div>
 </footer>
 
 <script src="assets/js/site.js"></script>
+<script>
+// Live shelf: pull ready-to-read books from the public catalog and show a
+// few of them here — the catalog is the main door, so put it in the window.
+(function () {
+  var strip = document.getElementById("shelf-strip");
+  var fb = document.getElementById("shelf-fallback");
+  var browse = document.getElementById("shelf-browse");
+  if (!strip || !fetch) return;
+  fetch("/api/public").then(function (r) { return r.json(); }).then(function (j) {
+    var books = (j && j.books || []).filter(function (b) { return b.hasPdf; });
+    if (!books.length) {
+      fb.textContent = "New books land here all the time — open the Reader to connect your own account, or come back soon.";
+      return;
+    }
+    fb.hidden = true;
+    browse.textContent = "Browse all " + books.length + " books →";
+    books.slice(0, 8).forEach(function (b) {
+      var a = document.createElement("a");
+      a.className = "shelf-card";
+      a.href = "app/read.html?id=" + encodeURIComponent(b.id);
+      var cv = document.createElement("div");
+      if (b.cover) {
+        cv.className = "shelf-cover";
+        var img = document.createElement("img");
+        img.src = b.cover; img.alt = ""; img.loading = "lazy";
+        cv.appendChild(img);
+      } else {
+        cv.className = "shelf-cover shelf-cover-ph";
+        cv.textContent = (b.title || "?").trim().charAt(0).toUpperCase();
+      }
+      var t = document.createElement("div");
+      t.className = "shelf-title";
+      t.textContent = b.title || "Untitled";
+      var m = document.createElement("div");
+      m.className = "shelf-meta";
+      m.textContent = (b.pages ? b.pages + " pages" : "") + (b.platform ? " · " + b.platform : "");
+      a.appendChild(cv); a.appendChild(t); a.appendChild(m);
+      strip.appendChild(a);
+    });
+    strip.hidden = false;
+  }).catch(function () {
+    fb.textContent = "The catalog is taking a moment — try again in a bit.";
+  });
+})();
+</script>
 </body>
 </html>

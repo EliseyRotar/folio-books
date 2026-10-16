@@ -711,6 +711,14 @@ Object.assign(window.FOLIO_IT, {
   "→ fetching the book package ({id})": "→ recupero del pacchetto del libro ({id})",
   "Reading copy": "Copia di lettura",
   "reading copy": "copia di lettura",
-  "Catalog →": "Catalog →"
+  "Catalog →": "Catalog →",
+  "The catalog is open": "Il catalogo è aperto",
+  "No account needed — the books are already waiting in the catalog. Open any of them and start reading right here in your browser, for free.": "Nessun account serve — i libri aspettano già nel catalogo. Aprine uno qualsiasi e inizia a leggere proprio qui nel browser, gratis.",
+  "Loading the catalog…": "Caricamento del catalogo…",
+  "New books land here all the time — open the Reader to connect your own account, or come back soon.": "Nuovi libri arrivano sempre qui — apri il Reader per collegare il tuo account, o torna presto.",
+  "The catalog is taking a moment — try again in a bit.": "Il catalogo sta mettendo un attimo — riprova tra poco.",
+  "Browse all {n} books →": "Sfoglia tutti i {n} libri →",
+  "Open the Catalog →": "Apri il Catalogo →",
+  "Untitled": "Senza titolo"
 });
 
