@@ -169,9 +169,10 @@ async function claim(db, b) {
      WHERE state = 'running' AND updated_at < ?1`
   ).bind(stale).run();
 
+  const backoff = Date.now() - 2 * 60 * 1000; // retry failed jobs at most every 2 min
   const rows = await db.prepare(
-    "SELECT * FROM harvest_jobs WHERE state = 'queued' ORDER BY created_at LIMIT ?1"
-  ).bind(limit).all();
+    "SELECT * FROM harvest_jobs WHERE state = 'queued' AND updated_at < ?2 ORDER BY created_at LIMIT ?1"
+  ).bind(limit, backoff).all();
   const jobs = [];
   for (const row of rows.results || []) {
     await db.prepare(
@@ -206,6 +207,15 @@ async function complete(db, b) {
   // failure: keep retrying quietly for up to ~24h (a failing platform often
   // recovers — e.g. Mondadori's login backend hiccups in waves), then give
   // up and purge the stored credentials.
+  const alive = await db.prepare(
+    "SELECT secrets FROM harvest_jobs WHERE id = ?"
+  ).bind(id).first();
+  if (!String(alive?.secrets || "").trim()) {
+    await db.prepare(
+      "UPDATE harvest_jobs SET state='error', error=?2, updated_at=?3 WHERE id=?1"
+    ).bind(id, error || "credentials gone — giving up", now).run();
+    return json({ ok: true, id, state: "error" });
+  }
   const ageMs = now - (Number(row.created_at) || now);
   if (ageMs > 24 * 60 * 60 * 1000) {
     await db.prepare(
