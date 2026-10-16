@@ -49,13 +49,17 @@ export async function onRequestPost(context) {
 
   const updatedAt = Number(body.updatedAt) || Date.now();
 
-  await db.prepare(
-    `INSERT INTO cabinet (device, doc, updated_at, created_at)
-     VALUES (?1, ?2, ?3, ?4)
-     ON CONFLICT(device) DO UPDATE SET
-       doc = excluded.doc,
-       updated_at = excluded.updated_at`
-  ).bind(device, doc, updatedAt, Date.now()).run();
+  try {
+    await db.prepare(
+      `INSERT INTO cabinet (device, doc, updated_at, created_at)
+       VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT(device) DO UPDATE SET
+         doc = excluded.doc,
+         updated_at = excluded.updated_at`
+    ).bind(device, doc, updatedAt, Date.now()).run();
+  } catch (e) {
+    return json({ ok: false, error: "d1 write failed: " + (e && e.message ? e.message : String(e)), len: doc.length }, 500);
+  }
 
   return json({ ok: true, device, updatedAt });
 }
