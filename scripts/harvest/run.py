@@ -53,7 +53,12 @@ def publish_and_upload(job: dict, pdf: bytes, pages: int) -> dict:
     if created.get("existing") and created.get("hasPdf"):
         return {"catalogId": book_id, "size": 0, "key": "", "already": True}
     if created.get("existing") and not delete_key:
-        raise RuntimeError("catalog already lists this book without a PDF and without our deleteKey")
+        # metadata-only row published by a device shelf sync — take it over
+        adopted = api("POST", "adopt", {"title": job.get("title", "")})
+        if not adopted.get("ok"):
+            raise RuntimeError("catalog already lists this book and cannot be adopted: " + adopted.get("error", ""))
+        book_id = adopted["id"]
+        delete_key = adopted["deleteKey"]
 
     chunks = 0
     for idx, off in enumerate(range(0, len(pdf), PART)):

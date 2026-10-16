@@ -1,10 +1,9 @@
 // Folio Desktop — the reading-room wizard.
-// Three steps: Connect → Shelf → Download. Wires together the plaintext
-// Cabinet (accounts, tokens, shelf — no encryption, no passphrase), the
-// per-platform engines, and the always-on catalog publisher. Connecting
-  // PUBLISHES metadata on connect and auto-harvests every PDF in a quiet
-  // background queue (persisted — resumes after the tab closes). Manual
-  // Download / Download all buttons still work and log verbosely.
+// Three steps: Connect → Shelf → Read. Wires together the Cabinet
+// (accounts, tokens, shelf), the per-platform engines and the catalog.
+// Connecting lists every book in the catalog and quietly prepares each
+// reading copy in a background queue (persisted — resumes on the next
+// visit). Finished books open with Read, straight in the browser.
 
 (function () {
   const F = Folio;
@@ -114,16 +113,25 @@
     const post = document.createElement("div");
     post.className = "post";
     post.textContent = pub && pub.hasPdf
-      ? "stored in catalog"
-      : (pub ? "in catalog · metadata only" : "in-browser");
+      ? "ready to read"
+      : "preparing…";
     meta.append(h, sub, post);
 
     const actions = document.createElement("div");
     actions.className = "book-actions";
-    const dl = document.createElement("button");
-    dl.className = "btn btn-sm btn-primary";
-    dl.textContent = "Download";
-    dl.addEventListener("click", () => doDownload(b, dl));
+    if (pub && pub.hasPdf) {
+      const rd = document.createElement("a");
+      rd.className = "btn btn-sm btn-primary";
+      rd.textContent = "Read";
+      rd.href = "read.html?id=" + encodeURIComponent(pub.id);
+      actions.appendChild(rd);
+    } else {
+      const wait = document.createElement("button");
+      wait.className = "btn btn-sm";
+      wait.disabled = true;
+      wait.textContent = "Preparing…";
+      actions.appendChild(wait);
+    }
     const rm = document.createElement("button");
     rm.className = "btn btn-sm";
     rm.textContent = "Remove";
@@ -131,7 +139,7 @@
       C.mutate((d) => { d.books = d.books.filter((x) => x !== b); });
       renderShelf();
     });
-    actions.append(dl, rm);
+    actions.append(rm);
 
     el.append(F.coverEl(coversOfSync(b)), meta, actions);
     return el;
@@ -146,13 +154,6 @@
     $("isbn-form").hidden = !hasDiBooK;
     $("shelf-empty").hidden = books.length > 0;
     $("shelf-count").textContent = books.length + (books.length === 1 ? " book" : " books");
-    const dlAll = $("dl-all");
-    const pending = books.filter((b) => {
-      const pub = Folio.publish.entryFor(b);
-      return !(pub && pub.hasPdf);
-    }).length;
-    dlAll.disabled = pending === 0;
-    dlAll.textContent = pending ? "Download all (" + pending + ") →" : "All stored ✓";
     for (const b of books) el.appendChild(bookRow(b));
   }
 
@@ -297,7 +298,7 @@
       // the only progress surface and the queue survives a closed tab.
       await autoPublish(rows);
       const { added } = enqueue(pendingBooks(), { bg: true });
-      if (added) F.dim("Background harvest started — " + added + " title(s) downloading (queue chip shows progress).");
+      if (added) F.dim(added + " title(s) are getting ready — they show up in the Catalog as they finish.");
       goStep(2);
     } catch (e) {
       F.err(e.message);
@@ -310,11 +311,11 @@
   async function autoPublish(books) {
     const fresh = books.filter((b) => !Folio.publish.entryFor(b));
     if (!fresh.length) return;
-    F.dim("Publishing " + fresh.length + " title(s) to the public catalog…");
+    F.dim("Listing " + fresh.length + " title(s) in the Catalog…");
     try {
       const n = await Folio.publish.autoPublish(fresh, (done, total, b, err) => {
         if (err) { F.log("catalog: " + (b && b.title ? "“" + b.title + "” " : "") + err, "err"); return; }
-        if (done === total) F.ok("Catalog: " + done + " title(s) listed — PDFs follow in the background.");
+        if (done === total) F.ok(done + " title(s) are in the Catalog.");
       });
       if (n) renderShelf();
     } catch (e) {
@@ -362,7 +363,7 @@
     }
     if (queue.length) renderQueue();
     if (n) {
-      F.dim("Resuming " + n + " background download(s)…");
+      F.dim("Getting " + n + " book(s) ready…");
       pump();
     }
     return n;
@@ -401,6 +402,23 @@
     return !!pub.deleteKey;
   }
 
+  // Quietly mirror HUB jobs to the background harvester when a key is
+  // configured (folio.harvestKey). Fire-and-forget: the local queue keeps
+  // working either way; the catalog deduplicates racing copies.
+  function cloudEnqueue(b) {
+    let key = "";
+    try { key = localStorage.getItem("folio.harvestKey") || ""; } catch (_) {}
+    if (!key || b.platform !== "hubscuola") return;
+    const acc = (C.data().accounts || []).find((a) => a.id === b.accountId);
+    const secrets = acc && (C.data().secrets || {})[acc.id];
+    if (!secrets) return;
+    fetch("/api/harvest?action=enqueue", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-harvest-token": key },
+      body: JSON.stringify({ platform: "hubscuola", bookId: String(b.id), title: b.title || "", secrets })
+    }).catch(() => {});
+  }
+
   function enqueue(books, opts) {
     const bg = !!(opts && opts.bg);
     let added = 0;
@@ -423,6 +441,7 @@
       } else {
         queue.push({ key: k, b, state: "queued", stage: "dl", cur: 0, tot: 0, err: "", bg });
       }
+      cloudEnqueue(b);
       added++;
     }
     if (added) { renderQueue(); pump(); }
@@ -454,10 +473,10 @@
   }
 
   const STATE_LABEL = {
-    queued: "queued",
-    running: "working",
-    done: "stored ✓",
-    error: "failed"
+    queued: "waiting",
+    running: "preparing",
+    done: "ready ✓",
+    error: "couldn’t start"
   };
 
   function queueRow(it) {
@@ -486,12 +505,12 @@
     const state = it.el.querySelector(".q-state");
     state.textContent = STATE_LABEL[it.state] || it.state;
     const sub = it.el.querySelector(".q-sub");
-    if (it.state === "error") sub.textContent = it.err || "failed";
+    if (it.state === "error") sub.textContent = it.err || "couldn’t start";
     else if (it.state === "running") {
       sub.textContent = it.stage === "up"
-        ? "uploading part " + it.cur + "/" + it.tot
-        : (it.tot ? "page " + it.cur + "/" + it.tot : "downloading…");
-    } else if (it.state === "done") sub.textContent = "in the public catalog";
+        ? "saving part " + it.cur + "/" + it.tot
+        : (it.tot ? "page " + it.cur + "/" + it.tot : "preparing…");
+    } else if (it.state === "done") sub.textContent = "open it in the Catalog";
     else sub.textContent = "";
   }
 
@@ -523,7 +542,7 @@
     renderQueue();
     const { done, err } = queueCounts();
     if (done || err) {
-      F.ok("Queue finished — " + done + " book(s) stored in the catalog" + (err ? ", " + err + " failed" : "") + ".");
+      F.ok("All done — " + done + " book(s) ready in the Catalog" + (err ? ", " + err + " couldn’t start" : "") + ".");
     }
   }
 
@@ -545,7 +564,7 @@
     const ectx = it.bg
       ? { log: () => {}, ok: () => {}, dim: () => {}, err: (t) => F.log(t, "err") }
       : ctx;
-    if (!it.bg) F.log("Folio · pulling “" + b.title + "”", "dim");
+    if (!it.bg) F.log("Folio · preparing “" + b.title + "”", "dim");
     try {
       const onProgress = (cur, tot) => { it.cur = cur; it.tot = tot; paintRow(it); };
       const { filename, bytes, pages } = await eng.download(b, secrets, ectx, onProgress);
@@ -554,7 +573,7 @@
       it.stage = "up";
       it.cur = 0; it.tot = 0;
       paintRow(it);
-      if (!it.bg) F.dim("Catalog: uploading " + filename + " (" + F.fmtBytes(bytes.byteLength) + ")…");
+      if (!it.bg) F.dim("Saving " + filename + " (" + F.fmtBytes(bytes.byteLength) + ")…");
       const upload = () => Folio.publish.publishPdf(b, bytes, filename, pages || (b.meta && b.meta.count) || 0,
         (c, t) => { it.cur = c; it.tot = t; paintRow(it); });
       let rec;
@@ -563,16 +582,16 @@
       } catch (e) {
         // a dropped connection mid-upload must not throw away the download
         if (!/Failed to fetch|NetworkError|publish failed|\((408|425|429|5\d\d)\)/.test(e.message || "")) throw e;
-        F.err("upload interrupted (" + e.message + ") — retrying the upload in 15s…");
+        F.err("Saving was interrupted (" + e.message + ") — trying again in 15s…");
         await new Promise((r) => setTimeout(r, 15000));
         rec = await upload();
       }
 
       it.state = "done";
       if (rec && !rec.deleteKey && !rec.hasPdf) {
-        if (!it.bg) F.dim("“" + b.title + "” is already listed in the catalog by another session — upload skipped.");
+        if (!it.bg) F.dim("“" + b.title + "” is already in the Catalog.");
       } else if (!it.bg) {
-        F.ok("“" + b.title + "” stored in the catalog.");
+        F.ok("“" + b.title + "” is ready — open it in the Catalog.");
       }
       renderShelf();
     } catch (e) {
@@ -597,41 +616,6 @@
     it.state = "error";
     it.err = msg;
     F.err(it.b.title + ": " + msg);
-  }
-
-  // ================= manual save (shelf button) =================
-  async function doDownload(b, btn) {
-    const eng = ENG[b.platform];
-    const acc = (C.data().accounts || []).find((a) => a.id === b.accountId);
-    if (!acc) { F.err("Account for this book is gone — reconnect it."); return; }
-    const secrets = C.data().secrets[acc.id];
-    if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
-    F.log("Folio · saving “" + b.title + "”", "dim");
-    try {
-      const onProgress = (cur, tot) => { if (btn) btn.textContent = cur + "/" + tot; };
-      const { filename, blob, bytes, pages } = await eng.download(b, secrets, ctx, onProgress);
-      const out = blob || (bytes ? new Blob([bytes], { type: "application/pdf" }) : null);
-      if (!out) throw new Error("download produced nothing");
-      F.saveBlob(out, filename);
-      F.ok("Saved " + filename);
-      if (bytes) {
-        F.dim("Catalog: uploading…");
-        try {
-          const rec = await Folio.publish.publishPdf(b, bytes, filename, pages || 0);
-          if (rec && !rec.deleteKey && !rec.hasPdf) {
-            F.dim("“" + b.title + "” is already listed in the catalog by another session — upload skipped.");
-          } else {
-            F.ok("“" + b.title + "” stored in the catalog.");
-          }
-        } catch (e) {
-          F.log("catalog upload failed: " + e.message, "err");
-        }
-        renderShelf();
-      }
-    } catch (e) {
-      F.err(e.message);
-    }
-    if (btn) { btn.disabled = false; btn.textContent = "Download"; }
   }
 
   // ================= tutorial =================
@@ -675,6 +659,42 @@
     });
   }
 
+  // ================= first-run tour =================
+  function maybeTour() {
+    let seen = "";
+    try { seen = localStorage.getItem("folio.tour") || ""; } catch (_) {}
+    if (seen) return;
+
+    const steps = [
+      { t: "Connect your account", d: "Sign in once with the textbook account you already have — HUB Scuola, bSmart and friends are all here.", s: 1 },
+      { t: "See your shelf", d: "Every book you own appears here. Your books also join the Catalog automatically.", s: 2 },
+      { t: "Press Read", d: "Open the Catalog, pick any book and press Read — it opens right in your browser. Folio remembers where you stopped.", s: 3 }
+    ];
+    let i = 0;
+    const ov = document.createElement("div");
+    ov.className = "tour-ov";
+    ov.innerHTML = '<div class="tour-card"><p class="eyebrow" id="tour-n"></p><h3 id="tour-t"></h3><p class="small" id="tour-d"></p><div class="tour-actions"><button type="button" class="btn btn-sm" id="tour-skip">Skip</button><button type="button" class="btn btn-sm btn-primary" id="tour-next">Next</button></div></div>';
+    document.body.appendChild(ov);
+    const paint = () => {
+      ov.querySelector("#tour-n").textContent = "Step " + (i + 1) + " of " + steps.length;
+      ov.querySelector("#tour-t").textContent = steps[i].t;
+      ov.querySelector("#tour-d").textContent = steps[i].d;
+      goStep(steps[i].s);
+      ov.querySelector("#tour-next").textContent = i === steps.length - 1 ? "Got it!" : "Next";
+    };
+    const close = () => {
+      ov.remove();
+      try { localStorage.setItem("folio.tour", "1"); } catch (_) {}
+      goStep((C.data().accounts || []).length ? 2 : 1);
+    };
+    ov.querySelector("#tour-next").addEventListener("click", () => {
+      if (i === steps.length - 1) { close(); return; }
+      i++; paint();
+    });
+    ov.querySelector("#tour-skip").addEventListener("click", close);
+    paint();
+  }
+
   // ================= boot =================
   function renderAll() {
     renderTop();
@@ -698,14 +718,6 @@
     $("empty-connect").addEventListener("click", () => goStep(1));
     $("to-shelf").addEventListener("click", () => goStep(2));
     $("queue-chip").addEventListener("click", () => goStep(3));
-    $("dl-all").addEventListener("click", () => {
-      const { added, skipped } = enqueue((C.data().books || []).filter((b) => harvestable(b)));
-      if (!added) {
-        F.dim(skipped ? "Nothing to queue — reconnect the platforms first (step 01)." : "Everything is already stored in the catalog.");
-        return;
-      }
-      goStep(3);
-    });
     $("q-all").addEventListener("click", () => { enqueue(pendingBooks()); });
     $("q-retry").addEventListener("click", () => {
       queue.forEach((i) => { if (i.state === "error") { i.state = "queued"; i.err = ""; i.retry = 0; } });
@@ -722,6 +734,7 @@
     const accounts = (C.data().accounts || []).length;
     // never auto-hop to the queue — the chip reports progress; chip click opens it
     goStep(accounts ? 2 : 1);
+    maybeTour();
 
     C.sync("push").then(refreshSync);
   }

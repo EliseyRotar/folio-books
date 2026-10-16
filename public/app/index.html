@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>try{var t=localStorage.getItem("folio.theme")||"dark";document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 <script src="../assets/js/i18n.js"></script>
-<title>Folio Reader — download your schoolbooks in the browser</title>
-<meta name="description" content="Folio Reader: connect your digital textbook accounts (HUB Scuola, MyLim, DiBooK, bSmart and more), keep them in one plaintext Cabinet and download your books as PDFs — all in the browser.">
-<meta name="keywords" content="download school books, download textbooks, ebook downloader, escolar book download, hub scuola download, mylim download, dibook download, bsmart download, scuola digitale">
+<title>Folio Reader — your schoolbooks, ready to read</title>
+<meta name="description" content="Folio Reader: connect your textbook account (HUB Scuola, MyLim, DiBooK, bSmart and more) and read every book right in your browser. Easy as one, two, three.">
+<meta name="keywords" content="read school books online, digital textbook reader, hub scuola, mylim, dibook, bsmart, scuola digitale, textbook browser">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Folio Reader — download your schoolbooks in the browser">
-<meta property="og:description" content="Your digital textbooks from every platform, in one plaintext Cabinet, downloaded as PDFs in your browser. Free and open source.">
+<meta property="og:title" content="Folio Reader — your schoolbooks, ready to read">
+<meta property="og:description" content="Your textbooks from every platform, in one place — read them right in your browser. Free and open source.">
 <meta property="og:url" content="./index.html">
 <meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -37,6 +37,7 @@
       </ul>
     </nav>
       <button type="button" class="theme-btn" data-theme-toggle aria-label="Switch colour theme">Light</button>
+      <button type="button" class="theme-btn lang-btn" data-lang-toggle aria-label="Switch language">IT</button>
   </div>
 </header>
 
@@ -44,8 +45,8 @@
 
   <section class="hero hero-tight">
     <p class="eyebrow">Sala di lettura · the reading room</p>
-    <h1>Your books, <span class="rusty">open,</span> ready to carry home.</h1>
-    <p class="lede">Three moves: connect the textbook platform you already own, look at your shelf — every title lists itself in the public <a href="catalog.html">Catalog</a> and Folio starts pulling every PDF down in the background, one after another, assembling each into a single stored PDF right here in the tab. Watch the queue chip, or press <b>Download</b> on any book to grab it now. Your credentials stay in a plaintext Cabinet on <i>this</i> device.</p>
+    <h1>Your books, <span class="rusty">open,</span> ready when you are.</h1>
+    <p class="lede">Three easy steps: connect the textbook account you already have, open your shelf, and press Read on any book — it opens right here in the browser. Your login stays on this device.</p>
   </section>
 
   <section id="desk" class="wizard" style="display:none">
@@ -62,14 +63,14 @@
     <ol class="wiz-nav" id="wiz-nav">
       <li data-step="1"><i>01</i><b>Connect</b><span>sign in to a platform</span></li>
       <li data-step="2"><i>02</i><b>Shelf</b><span>everything you own</span></li>
-      <li data-step="3"><i>03</i><b>Download</b><span>queue → PDF → catalog</span></li>
+      <li data-step="3"><i>03</i><b>Read</b><span>open any book</span></li>
     </ol>
 
     <!-- ============ STEP 1 — CONNECT ============ -->
     <section class="wstep" id="step-1">
       <div class="wstep-head">
         <h2>Connect a platform</h2>
-        <p class="small muted">Credentials are kept in this device’s plaintext Cabinet and only ever relayed to the platform you’re signing into.</p>
+        <p class="small muted">Sign in with your usual account. Your login is kept on this device only.</p>
       </div>
 
       <div class="grid-2" style="align-items:start">
@@ -96,11 +97,10 @@
     <section class="wstep" id="step-2" hidden>
       <div class="wstep-head">
         <h2>Your shelf</h2>
-        <p class="small muted">Every title below is already listed in the public catalog. Press <b>Download all</b> and Folio pulls each one down, one after another, and stores the finished PDF in the catalog.</p>
+        <p class="small muted">All your books in one list. Press Read on any title — books you haven’t opened yet prepare themselves quietly in the background.</p>
       </div>
 
       <div class="wstep-actions">
-        <button type="button" id="dl-all" class="btn btn-primary">Download all →</button>
         <button type="button" id="to-connect" class="btn">+ Connect another</button>
         <span class="cat-count" id="shelf-count"></span>
       </div>
@@ -123,11 +123,11 @@
       </div>
     </section>
 
-    <!-- ============ STEP 3 — DOWNLOAD ============ -->
+    <!-- ============ STEP 3 — READ ============ -->
     <section class="wstep" id="step-3" hidden>
       <div class="wstep-head">
-        <h2>Download queue</h2>
-        <p class="small muted">Books are pulled one at a time in this tab and uploaded to the catalog as they finish. You can leave this screen — the queue keeps running while the tab stays open.</p>
+        <h2>Preparing your books</h2>
+        <p class="small muted">Books get ready one at a time. When a book is ready it shows up in the catalog with a Read button — just come back later, or keep this page open.</p>
       </div>
 
       <div class="wstep-actions">
@@ -141,11 +141,11 @@
 
       <div class="empty-state" id="q-empty" hidden>
         <p><b>Queue is empty.</b></p>
-        <p class="small muted">Everything you own is already downloaded and stored in the catalog — or queue it from the shelf.</p>
+        <p class="small muted">Nothing is waiting. Everything you own is ready — open the catalog and start reading.</p>
       </div>
     </section>
 
-    <div class="log" id="log" aria-live="polite">The desk is open — connect a platform to begin.</div>
+    <div class="log" id="log" aria-live="polite">Welcome! Connect a textbook account to get started.</div>
   </section>
 
 </main>
@@ -153,7 +153,7 @@
 <footer class="colophon">
   <div class="page colophon-inner">
     <div class="mono">Folio<em>.</em> — your schoolbooks, in one place</div>
-    <div class="mono">Everything runs in this tab · credentials stay local · MIT</div>
+    <div class="mono">Read in your browser · your login stays on your device · MIT</div>
     <div class="mono"><a href="../platforms.html">The shelf →</a></div>
   </div>
 </footer>

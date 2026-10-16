@@ -36,15 +36,16 @@
       </ul>
     </nav>
       <button type="button" class="theme-btn" data-theme-toggle aria-label="Switch colour theme">Light</button>
+      <button type="button" class="theme-btn lang-btn" data-lang-toggle aria-label="Switch language">IT</button>
   </div>
 </header>
 
 <main class="page">
 
   <section class="hero">
-    <p class="eyebrow">Catalog · sommario pubblico</p>
-    <h1>Books people <span class="rusty">unlocked,</span> left on the table.</h1>
-    <p class="lede">Every title anyone pulls out of their Cabinet is shelved here anonymously — cover, title, author, and the full PDF you can read right in this tab. No accounts, no credentials, nothing that points back at the person who unlocked it.</p>
+    <p class="eyebrow">Catalog · sommario</p>
+    <h1>All your books, <span class="rusty">ready to read.</span></h1>
+    <p class="lede">Search a title, an author or a number and start reading right away — everything opens straight in your browser. Nothing to install, no waiting.</p>
     <div class="cat-tools">
       <input class="search" id="q" type="search" placeholder="Search title, author, ISBN or platform…" autocomplete="off" spellcheck="false">
       <span class="cat-count" id="count">loading…</span>
@@ -55,9 +56,9 @@
     <div class="cat-grid" id="grid" aria-live="polite"></div>
     <div class="cat-empty" id="empty" hidden>
       <p><b>The shelf is empty.</b></p>
-      <p class="small muted">Connect a platform in the <a href="index.html">Reader</a> — every book you unlock publishes itself here as soon as it lands.</p>
+      <p class="small muted">Connect your textbook account in the Reader — your books appear here on their own.</p>
     </div>
-    <p class="small muted mt-2" id="failed" hidden>Couldn’t reach <code>/api/public</code>. Deploy this on Cloudflare Pages with D1 bound and the catalog fills itself.</p>
+    <p class="small muted mt-2" id="failed" hidden>The catalog couldn’t load right now. Please try again in a moment.</p>
   </section>
 
 </main>
@@ -65,7 +66,7 @@
 <footer class="colophon">
   <div class="page colophon-inner">
     <div class="mono">Folio<em>.</em> — your schoolbooks, in one place</div>
-    <div class="mono">Metadata only · no credentials ever leave a Cabinet</div>
+    <div class="mono">Read in your browser · nothing tracked</div>
     <div class="mono"><a href="index.html">Open the Reader →</a></div>
   </div>
 </footer>
@@ -103,11 +104,24 @@
     const h3 = document.createElement("h3");
     h3.textContent = b.title || "Untitled";
     const who = [b.author, b.platform].filter(Boolean).map(F.esc).join(" · ") || (b.isbn ? "ISBN " + F.esc(b.isbn) : "");
+    // continue-reading chip: show where this device last left off
+    let resume = "";
+    try {
+      const p = parseInt(localStorage.getItem("folio.progress." + b.id), 10) || 0;
+      if (p > 1 && b.pages) {
+        const pct = Math.min(100, Math.round((p / b.pages) * 100));
+        resume = "page " + p + " · " + pct + "% read";
+      } else if (p > 1) {
+        resume = "page " + p;
+      }
+    } catch (_) {}
     const st = document.createElement("div");
-    st.className = b.hasPdf ? "st pinned" : "st";
-    st.textContent = b.hasPdf
-      ? (b.pages ? b.pages + (b.pages === 1 ? " page · " : " pages · ") : "") + F.fmtBytes(b.size || 0)
-      : "metadata only";
+    st.className = b.hasPdf ? (resume ? "st pinned resume" : "st pinned") : "st";
+    st.textContent = resume
+      ? resume
+      : (b.hasPdf
+          ? (b.pages ? b.pages + (b.pages === 1 ? " page · " : " pages · ") : "") + F.fmtBytes(b.size || 0)
+          : "preparing…");
     a.append(coverWrap, h3);
     if (who) {
       const w = document.createElement("div");

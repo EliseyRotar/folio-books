@@ -18,6 +18,9 @@
 
 const CAP_BYTES = 9 * 1024 * 1024 * 1024; // 9 GiB — headroom under R2's 10 GB free tier
 const MAX_TITLE = 300;
+function normTitle(s) {
+  return String(s || "").replace(/[\t\n\r\f\v]+/g, " ").replace(/ {2,}/g, " ").trim().toLowerCase();
+}
 const MAX_SECRETS = 8000;
 const MAX_ATTEMPTS = 3;
 const MAX_PART = 30 * 1024 * 1024; // R2 part ceiling in publish.js is 32 MB
@@ -34,6 +37,7 @@ export async function onRequestPost(context) {
 
   // binary part upload — raw body, no JSON parse
   if (action === "up") return upPart(context, db, url);
+  if (action === "admindel") return adminDel(context, db);
 
   let body = {};
   try { body = await context.request.json(); } catch (_) {}
@@ -41,6 +45,7 @@ export async function onRequestPost(context) {
   if (action === "enqueue") return enqueue(db, body);
   if (action === "claim") return claim(db, body);
   if (action === "complete") return complete(db, body);
+  if (action === "adopt") return adopt(db, body);
   return json({ ok: false, error: "unknown action" }, 400);
 }
 
@@ -121,6 +126,40 @@ async function enqueue(db, b) {
   return json({ ok: true, id });
 }
 
+// --- adopt (workflow) -----------------------------------------------------
+// A catalog row may already exist as metadata-only (published by a device
+// shelf sync) with a deleteKey we never saw. The harvester must be able to
+// finish that book: take the row over by setting a fresh deleteKey, then
+// upload parts against it.
+async function adopt(db, b) {
+  const isbn = String(b.isbn || "").replace(/[^0-9Xx]/gi, "").slice(0, 32);
+  const title = String(b.title || "").trim().slice(0, MAX_TITLE);
+
+  let row = null;
+  if (isbn) {
+    row = await db.prepare(
+      "SELECT id, has_pdf, delete_key FROM catalog WHERE replace(replace(lower(isbn),'-',''),' ','') = ?1 LIMIT 1"
+    ).bind(isbn.toLowerCase()).first();
+  }
+  if (!row && title) {
+    const nt = normTitle(title);
+    const rows = await db.prepare(
+      "SELECT id, has_pdf, delete_key, title FROM catalog WHERE title <> '' LIMIT 5000"
+    ).all();
+    for (const r of rows.results || []) {
+      if (normTitle(r.title) === nt) { row = r; break; }
+    }
+  }
+  if (!row) return json({ ok: false, error: "no catalog row to adopt" }, 404);
+  if (row.has_pdf) return json({ ok: false, id: row.id, error: "already has a PDF" }, 409);
+
+  const deleteKey = crypto.randomUUID().replace(/-/g, "");
+  await db.prepare(
+    "UPDATE catalog SET delete_key = ?1, updated_at = ?2 WHERE id = ?3"
+  ).bind(deleteKey, Date.now(), row.id).run();
+  return json({ ok: true, id: row.id, deleteKey });
+}
+
 // --- claim (workflow) ----------------------------------------------------
 async function claim(db, b) {
   const limit = Math.max(1, Math.min(5, Number(b.limit) || 2));
@@ -147,7 +186,7 @@ async function claim(db, b) {
 async function complete(db, b) {
   const id = String(b.id || "").slice(0, 40);
   if (!id) return json({ ok: false, error: "id required" }, 400);
-  const row = await db.prepare("SELECT attempts FROM harvest_jobs WHERE id = ?").bind(id).first();
+  const row = await db.prepare("SELECT attempts, created_at FROM harvest_jobs WHERE id = ?").bind(id).first();
   if (!row) return json({ ok: false, error: "not found" }, 404);
 
   const ok = !!b.ok;
@@ -164,9 +203,11 @@ async function complete(db, b) {
     return json({ ok: true, id, state: "done" });
   }
 
-  // failure: retry up to MAX_ATTEMPTS, then terminal — secrets purged
-  const attempts = Number(row.attempts) || 1;
-  if (attempts >= MAX_ATTEMPTS) {
+  // failure: keep retrying quietly for up to ~24h (a failing platform often
+  // recovers — e.g. Mondadori's login backend hiccups in waves), then give
+  // up and purge the stored credentials.
+  const ageMs = now - (Number(row.created_at) || now);
+  if (ageMs > 24 * 60 * 60 * 1000) {
     await db.prepare(
       "UPDATE harvest_jobs SET state='error', error=?2, secrets='', updated_at=?3 WHERE id=?1"
     ).bind(id, error, now).run();
@@ -175,7 +216,32 @@ async function complete(db, b) {
   await db.prepare(
     "UPDATE harvest_jobs SET state='queued', error=?2, updated_at=?3 WHERE id=?1"
   ).bind(id, error, now).run();
-  return json({ ok: true, id, state: "queued", attempts });
+  return json({ ok: true, id, state: "queued", attempts: Number(row.attempts) || 0 });
+}
+
+// --- admin delete (operator-only, same HARVEST_TOKEN) -------------------
+// Removes a published catalog row + its stored parts. No public UI — this
+// exists so a wrong or duplicate book can be pulled back down.
+async function adminDel(context, db) {
+  const books = context.env.BOOKS;
+  let body = {};
+  try { body = await context.request.json(); } catch (_) {}
+  const id = String(body.id || "").slice(0, 40);
+  if (!id) return json({ ok: false, error: "id required" }, 400);
+
+  const row = await db.prepare("SELECT id FROM catalog WHERE id = ?").bind(id).first();
+  if (!row) return json({ ok: false, error: "not found" }, 404);
+
+  if (books) {
+    try {
+      const listed = await books.list({ prefix: "book/" + id + "/" });
+      const keys = (listed.objects || []).map((o) => o.key);
+      if (keys.length) await books.delete(keys);
+    } catch (_) { /* best effort */ }
+  }
+  await db.prepare("DELETE FROM catalog_chunk WHERE book_id = ?").bind(id).run();
+  await db.prepare("DELETE FROM catalog WHERE id = ?").bind(id).run();
+  return json({ ok: true, id });
 }
 
 // --- part upload (runner -> R2 via Pages Function, one secret total) ----

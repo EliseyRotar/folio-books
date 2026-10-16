@@ -31,6 +31,7 @@
       </ul>
     </nav>
       <button type="button" class="theme-btn" data-theme-toggle aria-label="Switch colour theme">Light</button>
+      <button type="button" class="theme-btn lang-btn" data-lang-toggle aria-label="Switch language">IT</button>
   </div>
 </header>
 
@@ -47,20 +48,20 @@
       <div class="facts" id="facts"></div>
 
       <div id="cta-block">
-        <button type="button" class="btn btn-primary" id="open">Open in browser</button>
+        <button type="button" class="btn btn-primary" id="open">Read now</button>
         <span class="small muted" id="hint" style="margin-left:.8rem"></span>
       </div>
 
       <div id="load" style="display:none">
-        <div class="progress" role="progressbar" aria-label="Downloading PDF"><i id="bar"></i></div>
-        <div class="progress-label" id="plabel">assembling…</div>
+        <div class="progress" role="progressbar" aria-label="Preparing the book"><i id="bar"></i></div>
+        <div class="progress-label" id="plabel">preparing…</div>
       </div>
 
       <p class="small muted mt-2" id="err" style="color:var(--red)" hidden></p>
 
       <div class="notice mt-2" id="none" hidden>
-        <b>Metadata only.</b> This title is on the catalog but its PDF hasn’t been
-        published yet — download it once in the <a href="index.html">Reader</a> and it appears here.
+        <b>Almost ready.</b> This title is in the catalog but the reading copy isn’t prepared yet.
+        Give it a little while — it appears here automatically.
       </div>
     </div>
   </section>
@@ -68,7 +69,7 @@
   <div class="viewer" id="viewer" hidden>
     <div class="viewer-bar">
       <span id="vname">book.pdf</span>
-      <span><a id="vdl" download href="#">download</a></span>
+      <span class="small muted" id="vstatus"></span>
     </div>
     <iframe id="frame" title="PDF viewer"></iframe>
   </div>
@@ -78,7 +79,7 @@
 <footer class="colophon">
   <div class="page colophon-inner">
     <div class="mono">Folio<em>.</em> — your schoolbooks, in one place</div>
-    <div class="mono">Assembled in this tab · nothing tracked</div>
+    <div class="mono">Read in your browser · nothing tracked</div>
     <div class="mono"><a href="catalog.html">Catalog →</a></div>
   </div>
 </footer>
@@ -93,6 +94,79 @@
   const id = (params.get("id") || "").trim();
 
   if (!id) { location.replace("catalog.html"); return; }
+
+  const PROGRESS_KEY = (bookId) => "folio.progress." + bookId;
+  const OFFLINE_DB = "folio-offline";
+  const OFFLINE_CAP = 300 * 1024 * 1024; // keep at most ~300 MB of opened books
+
+  // ---- last-page memory (continue reading) ----------------------------
+  function lastPage() {
+    try { return Math.max(1, parseInt(localStorage.getItem(PROGRESS_KEY(id)), 10) || 1); } catch (_) { return 1; }
+  }
+  function savePage(n) {
+    try { localStorage.setItem(PROGRESS_KEY(id), String(n)); } catch (_) {}
+  }
+
+  // ---- offline store (IndexedDB, LRU-capped) --------------------------
+  function idb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(OFFLINE_DB, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("books", { keyPath: "id" });
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function cachedBlob() {
+    try {
+      const db = await idb();
+      const row = await new Promise((resolve, reject) => {
+        const tx = db.transaction("books", "readonly");
+        const r = tx.objectStore("books").get(id);
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+      if (row && row.blob) {
+        row.ts = Date.now();
+        try {
+          const db2 = await idb();
+          const tx2 = db2.transaction("books", "readwrite");
+          tx2.objectStore("books").put(row);
+        } catch (_) {}
+        return row.blob;
+      }
+    } catch (_) {}
+    return null;
+  }
+  async function storeBlob(blob) {
+    try {
+      const db = await idb();
+      const tx = db.transaction("books", "readwrite");
+      const store = tx.objectStore("books");
+      store.put({ id, blob, size: blob.size, ts: Date.now() });
+      await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+      // evict oldest entries if over the cap
+      const all = await new Promise((resolve, reject) => {
+        const t = db.transaction("books", "readonly");
+        const r = t.objectStore("books").getAll();
+        r.onsuccess = () => resolve(r.result || []);
+        r.onerror = () => reject(r.error);
+      });
+      let total = all.reduce((n, r) => n + (r.size || 0), 0);
+      if (total > OFFLINE_CAP) {
+        all.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        const kill = [];
+        for (const r of all) {
+          if (total <= OFFLINE_CAP) break;
+          kill.push(r.id);
+          total -= r.size || 0;
+        }
+        if (kill.length) {
+          const t2 = db.transaction("books", "readwrite");
+          kill.forEach((k) => t2.objectStore("books").delete(k));
+        }
+      }
+    } catch (_) { /* offline cache is best-effort */ }
+  }
 
   function setCover(book) {
     const slot = $("cover-slot");
@@ -109,7 +183,9 @@
     }).catch(() => {});
   }
 
-  function fact(v) { return v ? '<span>' + F.esc(v) + "</span>" : ""; }
+  function fact(v) { return v ? "<span>" + F.esc(v) + "</span>" : ""; }
+
+  let currentBook = null;
 
   async function load() {
     let book = null;
@@ -125,6 +201,7 @@
       $("cta-block").hidden = true;
       return;
     }
+    currentBook = book;
 
     document.title = book.title + " — Folio";
     setCover(book);
@@ -143,7 +220,13 @@
       $("none").hidden = false;
       return;
     }
-    $("hint").textContent = "the full " + (book.pages ? book.pages + "-page " : "") + "PDF, no download needed";
+
+    const p = lastPage();
+    if (p > 1) $("open").textContent = "Continue at page " + p;
+    const cached = await cachedBlob();
+    if (cached) $("hint").textContent = "opens instantly · saved on this device";
+    else $("hint").textContent = "the full " + (book.pages ? book.pages + "-page " : "") + "book, ready to read";
+
     $("open").addEventListener("click", () => open(book));
   }
 
@@ -151,42 +234,62 @@
     $("open").disabled = true;
     $("load").style.display = "";
     try {
-      const infoR = await fetch("/api/pdf?id=" + encodeURIComponent(id) + "&page=info");
-      const info = await infoR.json();
-      if (!infoR.ok || !info.ok) throw new Error(info.error || "metadata unavailable");
+      let blob = await cachedBlob();
+      if (!blob) {
+        const infoR = await fetch("/api/pdf?id=" + encodeURIComponent(id) + "&page=info");
+        const info = await infoR.json();
+        if (!infoR.ok || !info.ok) throw new Error(info.error || "metadata unavailable");
 
-      const total = info.chunks || 0;
-      if (!total) throw new Error("this book has no stored PDF chunks");
+        const total = info.chunks || 0;
+        if (!total) throw new Error("this book is still being prepared");
 
-      const parts = new Array(total);
-      let done = 0;
-      const CONC = 4;
-      let next = 0;
+        const parts = new Array(total);
+        let done = 0;
+        const CONC = 4;
+        let next = 0;
 
-      async function worker() {
-        for (;;) {
-          const i = next++;
-          if (i >= total) return;
-          const r = await fetch("/api/pdf?id=" + encodeURIComponent(id) + "&page=" + i);
-          if (!r.ok) throw new Error("chunk " + i + " failed (HTTP " + r.status + ")");
-          parts[i] = await r.arrayBuffer();
-          done++;
-          $("bar").style.width = Math.round((done / total) * 100) + "%";
-          $("plabel").textContent = "assembling " + done + "/" + total + " segments · " +
-            F.fmtBytes(Math.round((info.size || 0) * (done / total)));
+        async function worker() {
+          for (;;) {
+            const i = next++;
+            if (i >= total) return;
+            const r = await fetch("/api/pdf?id=" + encodeURIComponent(id) + "&page=" + i);
+            if (!r.ok) throw new Error("chunk " + i + " failed (HTTP " + r.status + ")");
+            parts[i] = await r.arrayBuffer();
+            done++;
+            $("bar").style.width = Math.round((done / total) * 100) + "%";
+            $("plabel").textContent = "preparing " + done + "/" + total + " · " +
+              F.fmtBytes(Math.round((info.size || 0) * (done / total)));
+          }
         }
+        await Promise.all(Array.from({ length: Math.min(CONC, total) }, worker));
+        blob = new Blob(parts, { type: "application/pdf" });
+        storeBlob(blob);
+      } else {
+        $("plabel").textContent = "opening from this device…";
+        $("bar").style.width = "100%";
       }
-      await Promise.all(Array.from({ length: Math.min(CONC, total) }, worker));
 
-      const blob = new Blob(parts, { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
-      $("vname").textContent = info.filename || (book.title + ".pdf");
-      $("vdl").href = url;
-      $("vdl").setAttribute("download", info.filename || "book.pdf");
-      $("frame").src = url;
+      $("vname").textContent = (currentBook && currentBook.title) || "book";
+      const page = lastPage();
+      $("vstatus").textContent = page > 1 ? "resumed at page " + page : "";
+      const viewer = "../assets/pdfjs/web/viewer.html?file=" + encodeURIComponent(url) +
+        "#page=" + page + "&zoom=page-width";
+      $("frame").src = viewer;
       $("viewer").hidden = false;
       $("load").style.display = "none";
       $("viewer").scrollIntoView({ behavior: "smooth", block: "start" });
+
+      // remember the page while reading (same-origin iframe)
+      try {
+        const attach = () => {
+          const app = $("frame").contentWindow && $("frame").contentWindow.PDFViewerApplication;
+          if (!app || !app.eventBus) { setTimeout(attach, 400); return; }
+          app.eventBus.on("pagechanging", (e) => { if (e && e.pageNumber) savePage(e.pageNumber); });
+        };
+        $("frame").addEventListener("load", attach);
+        setTimeout(attach, 800);
+      } catch (_) {}
     } catch (e) {
       $("err").hidden = false;
       $("err").textContent = e.message;
