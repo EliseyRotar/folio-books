@@ -30,3 +30,6 @@ Thumbs.db
 
 # --- vendored reference repos (nested clones, not submodules) ---
 tools/
+*.jpeg
+*.jpg
+*.png
