@@ -93,7 +93,7 @@ helper.download = async function download(book, secrets, ctx, onProgress) {
   const userToken = (Folio.cabinet.data().secrets[acc.id] || {}).token;
   if (!userToken) throw new Error("No Educadhoc session for this account — reconnect.");
 
-  log("Educadhoc · downloading “" + book.title + "” via the relay…", "dim");
+  log("Educadhoc · preparing “" + book.title + "”…", "dim");
   const sum = await F.api(`${EX_BANK}/summary?bankId=${encodeURIComponent(book.isbn)}`, { headers: { Authorization: "Bearer " + userToken } }, { viaProxy: true }).then((r) => r.json());
   const pages = (sum && sum.data && sum.data.find((s) => s.section === "spine-fxl") && sum.data.find((s) => s.section === "spine-fxl").children) || [];
   if (!pages.length) throw new Error("Educadhoc returned no FXL pages for this volume.");

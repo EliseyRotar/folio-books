@@ -46,9 +46,9 @@
   function refreshSync() {
     const chip = $("sync-chip");
     const m = {
-      synced: ["green", "synced · plaintext cloud backup"],
-      local: ["ink", "local only — set up Cloudflare Pages to sync"],
-      "cloud-available": ["blue", "cloud has a newer copy — restore"]
+      synced: ["green", "saved · up to date"],
+      local: ["ink", "saved on this device only"],
+      "cloud-available": ["blue", "a newer copy exists — restore"]
     };
     const [cls, txt] = m[C.syncState()] || ["ink", "…"];
     chip.textContent = txt;
@@ -568,7 +568,7 @@
     try {
       const onProgress = (cur, tot) => { it.cur = cur; it.tot = tot; paintRow(it); };
       const { filename, bytes, pages } = await eng.download(b, secrets, ectx, onProgress);
-      if (!bytes) throw new Error("download produced nothing");
+      if (!bytes) throw new Error("the reading copy came back empty");
 
       it.stage = "up";
       it.cur = 0; it.tot = 0;
@@ -606,7 +606,7 @@
       }
       fail(it, e.message);
       if (eng.meta && eng.meta.needsRelay && !(await F.relayAvailable().catch(() => false))) {
-        F.dim("Hint: this platform needs the Folio relay — deploy on Cloudflare Pages.");
+        F.dim("Hint: this platform isn’t available yet.");
       }
     }
     paintRow(it);

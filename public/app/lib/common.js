@@ -65,7 +65,7 @@ async function relay(url, opts) {
         })
       });
     } catch (_) {
-      lastErr = new Error("The Folio relay is unreachable. Deploy on Cloudflare Pages for full coverage.");
+      lastErr = new Error("Couldn’t reach the platform. Try again in a moment.");
       if (attempt >= delays.length) throw lastErr;
       continue;
     }

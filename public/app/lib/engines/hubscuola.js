@@ -128,7 +128,7 @@ Folio.engines.hubscuola = {
     } catch (_) { /* fall back to library title */ }
     ctx.ok("Title: " + title);
 
-    ctx.log("→ downloadPackage " + book.id + " /publication.zip");
+    ctx.log("→ fetching the book package (" + book.id + ")");
     const pubRes = await Folio.api(
       "https://ms-mms.hubscuola.it/downloadPackage/" + book.id + "/publication.zip?tokenId=" + encodeURIComponent(s.token),
       { headers });

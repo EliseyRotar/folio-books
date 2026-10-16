@@ -38,7 +38,7 @@ Folio.engines.bsmart = {
       "Press <b>F12</b> → <b>Application</b> (Chrome/Edge) or <b>Storage</b> (Firefox) → <b>Cookies</b> → <code>my.bsmart.it</code>.",
       "Find the cookie <code>_bsw_session_v1_production</code>, double-click its <b>Value</b> and copy it.",
       "Paste it below. Leave the site selector on <b>bsmart.it</b> unless your school uses DigiBook24.",
-      "Press <b>Connect</b> — your shelf appears, and <b>Download</b> rebuilds any book as one PDF right here."
+      "Press <b>Connect</b> — your books appear on the shelf and in the catalog, ready to read."
     ]
   },
   creds: [
