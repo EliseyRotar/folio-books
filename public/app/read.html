@@ -273,7 +273,7 @@
       $("vname").textContent = (currentBook && currentBook.title) || "book";
       const page = lastPage();
       $("vstatus").textContent = page > 1 ? "resumed at page " + page : "";
-      const viewer = "../assets/pdfjs/web/viewer.html?file=" + encodeURIComponent(url) +
+      const viewer = "../assets/pdfjs/web/viewer?file=" + encodeURIComponent(url) +
         "#page=" + page + "&zoom=page-width";
       $("frame").src = viewer;
       $("viewer").hidden = false;

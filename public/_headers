@@ -13,3 +13,9 @@
   Cache-Control: public, max-age=300, must-revalidate
 /app/lib/*
   Cache-Control: public, max-age=300, must-revalidate
+
+# The reading viewer lives in an iframe on /app/read — allow same-origin framing.
+/assets/pdfjs/web/viewer.html
+  X-Frame-Options: SAMEORIGIN
+/assets/pdfjs/web/viewer
+  X-Frame-Options: SAMEORIGIN
