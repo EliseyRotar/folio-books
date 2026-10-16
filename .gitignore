@@ -27,3 +27,6 @@ Thumbs.db
 .idea/
 .vscode/
 .i18n-parts/
+
+# --- vendored reference repos (nested clones, not submodules) ---
+tools/
