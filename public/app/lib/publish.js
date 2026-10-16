@@ -32,7 +32,10 @@
     if (v == null) return "";
     if (typeof v === "string") return v;
     if (Array.isArray(v)) return v.map(authorText).filter(Boolean).join(", ");
-    if (typeof v === "object") return authorText(v.name || v.fullName || v.value || v.label || "");
+    if (typeof v === "object") {
+      const full = [v.name, v.surname, v.lastName].filter(Boolean).join(" ");
+      return authorText(full || v.fullName || v.value || v.label || "");
+    }
     return String(v);
   }
 
