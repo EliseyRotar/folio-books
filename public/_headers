@@ -1,9 +1,16 @@
 # Folio — response headers (Cloudflare Pages)
 /*
   X-Content-Type-Options: nosniff
-  X-Frame-Options: DENY
   Referrer-Policy: no-referrer
   Permissions-Policy: browsing-topics=()
+
+# Framing is denied where credentials or the personal shelf live. The
+# pdf.js viewer (/assets/pdfjs/...) is intentionally absent from these
+# rules so /app/read can embed it in a same-origin iframe.
+/app/*
+  X-Frame-Options: DENY
+/tokens.html
+  X-Frame-Options: DENY
 
 # The site is edited and deployed often; assets carry an ETag, so a short
 # TTL + must-revalidate gives 304s instead of a full day of stale JS/CSS.
@@ -13,9 +20,3 @@
   Cache-Control: public, max-age=300, must-revalidate
 /app/lib/*
   Cache-Control: public, max-age=300, must-revalidate
-
-# The reading viewer lives in an iframe on /app/read — allow same-origin framing.
-/assets/pdfjs/web/viewer.html
-  X-Frame-Options: SAMEORIGIN
-/assets/pdfjs/web/viewer
-  X-Frame-Options: SAMEORIGIN
