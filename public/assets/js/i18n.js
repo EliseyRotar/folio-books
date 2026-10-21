@@ -108,6 +108,18 @@
     var ATTRS = ["placeholder", "title", "aria-label", "alt"];
     var SKIP = /^(SCRIPT|STYLE|NOSCRIPT|CODE|PRE|TEXTAREA)$/;
 
+    // Block-level structure the walker must never replace wholesale: lists,
+    // tables, cards, multi-column layouts keep their markup and get
+    // translated from the inside instead (each child carries its own key).
+    // Without this guard a container key (full section text as one string)
+    // would flatten the whole block into a single run-on text node.
+    var STRUCT = "div,p,li,ul,ol,dl,dt,dd,h1,h2,h3,h4,h5,h6,table,thead,tbody,tfoot,tr,td,th,section,article,header,footer,nav,main,aside,details,summary,figure,figcaption,blockquote,form,fieldset,hr";
+    function hasStruct(el) {
+      var tag = (el.tagName || "").toLowerCase();
+      if (("," + STRUCT + ",").indexOf("," + tag + ",") >= 0) return true;
+      return !!el.querySelector(STRUCT);
+    }
+
     function scanNode(el) {
       if (!el || el.nodeType !== 1) return;
       if (SKIP.test(el.tagName || "")) return;
@@ -130,7 +142,7 @@
       if (hasElem) {
         var fullRaw = norm(el.textContent);
         var full = resolve(fullRaw);
-        if (full != null && full.indexOf("<") >= 0) {
+        if (full != null && full.indexOf("<") >= 0 && !hasStruct(el)) {
           el.innerHTML = full;
           return;
         }
@@ -152,9 +164,13 @@
 
       // heavily marked-up blocks (tutorials: "Open <b>my.bsmart.it</b> …")
       // expose only full-sentence keys — prefer the element's full text so
-      // the block can't end up half-English. Elements with functional
-      // children (links, buttons) keep the fragment path so markup survives.
-      if (hasElem && full != null && full !== fullRaw &&
+      // the block can't end up half-English. Functional elements (links,
+      // buttons — themselves or descendants) keep the fragment path so
+      // markup survives, and elements with structural children (li/div/table
+      // …) recurse so the layout survives — only inline-markup nodes are
+      // flattened here.
+      if (hasElem && full != null && full !== fullRaw && !hasStruct(el) &&
+          !/^(A|BUTTON|INPUT|SELECT|TEXTAREA)$/.test(el.tagName || "") &&
           !el.querySelector("a,button,input,select,textarea")) {
         el.textContent = full;
         return;
