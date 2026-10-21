@@ -15,9 +15,14 @@ export async function onRequestGet(context) {
   const device = (new URL(context.request.url).searchParams.get("device") || "").trim();
   if (!device) return json({ ok: false, error: "missing device id" }, 400);
 
-  const row = await db.prepare(
-    "SELECT device, doc, updated_at FROM cabinet WHERE device = ?"
-  ).bind(device).first();
+  let row;
+  try {
+    row = await db.prepare(
+      "SELECT device, doc, updated_at FROM cabinet WHERE device = ?"
+    ).bind(device).first();
+  } catch (e) {
+    return json({ ok: false, error: "d1 read failed: " + (e && e.message ? e.message : String(e)) }, 500);
+  }
 
   if (!row) return json({ ok: true, exists: false, device });
 
@@ -71,7 +76,11 @@ export async function onRequestDelete(context) {
   const device = (new URL(context.request.url).searchParams.get("device") || "").trim();
   if (!device) return json({ ok: false, error: "missing device id" }, 400);
 
-  await db.prepare("DELETE FROM cabinet WHERE device = ?").bind(device).run();
+  try {
+    await db.prepare("DELETE FROM cabinet WHERE device = ?").bind(device).run();
+  } catch (e) {
+    return json({ ok: false, error: "d1 delete failed: " + (e && e.message ? e.message : String(e)) }, 500);
+  }
   return json({ ok: true });
 }
 

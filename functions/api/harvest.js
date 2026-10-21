@@ -78,10 +78,7 @@ export async function onRequestGet(context) {
 async function checkAuth(context) {
   const token = context.env.HARVEST_TOKEN;
   if (!token) return json({ ok: false, error: "harvest not configured" }, 503);
-  const got =
-    context.request.headers.get("x-harvest-token") ||
-    new URL(context.request.url).searchParams.get("t") ||
-    "";
+  const got = context.request.headers.get("x-harvest-token") || "";
   if (!timingSafeEqual(got, token)) return json({ ok: false, error: "bad token" }, 403);
   return null;
 }

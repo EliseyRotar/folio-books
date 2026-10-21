@@ -50,7 +50,8 @@ Folio.engines.mylim = {
     })).json();
     if (!info.url) throw new Error("No PDF url returned.");
     ctx.log("→ fetching " + info.url);
-    const blob = await (await Folio.api(info.url, { headers: { Authorization: "JWT " + s.token } })).blob();
-    return { filename: Folio.sanitizeName(book.title) + ".pdf", blob };
+    const res = await Folio.api(info.url, { headers: { Authorization: "JWT " + s.token } });
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    return { filename: Folio.sanitizeName(book.title) + ".pdf", bytes };
   }
 };

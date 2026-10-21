@@ -26,8 +26,31 @@ export async function onRequestGet(context) {
 
   if (wantImg && isbn) return coverImage(context, isbn);
   if (isbn) {
+    // Same edge cache as the title path — keyless Google Books quota is
+    // shared per egress IP, so every uncached ISBN lookup burns it.
+    const cache = globalThis.caches && caches.default;
+    const key = new Request("https://folio.internal/cover?isbn=" + encodeURIComponent(isbn));
+
+    if (cache) {
+      const hit = await cache.match(key);
+      if (hit) {
+        const body = await hit.json().catch(() => ({ ok: false }));
+        return json(body, 200, hit.headers.get("x-folio-ttl") === "miss" ? "HIT-NEG" : "HIT");
+      }
+    }
+
     const body = (await resolveIsbn(isbn)) || { ok: false, error: "no cover for isbn" };
-    return json(body, 200, body.ok ? undefined : "MISS-NEG");
+    if (cache) {
+      const res = new Response(JSON.stringify(body), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "public, max-age=" + (body.ok ? TTL_HIT : TTL_MISS),
+          "x-folio-ttl": body.ok ? "hit" : "miss"
+        }
+      });
+      context.waitUntil(cache.put(key, res.clone()));
+    }
+    return json(body, 200, body.ok ? "MISS" : "MISS-NEG");
   }
   if (!q) return json({ ok: false, error: "q or isbn required" }, 400);
 

@@ -18,9 +18,10 @@ const ALLOWED_HOST = [
   /(^|\.)digibook24\.com$/i,     // DigiBook24 (same shelf, other front door)
   /(^|\.)digibook\.it$/i,
   /(^|\.)dibooklaterza\.it$/i,
-  /(^|\.)pearson.*\.com$/i,
+  /(^|\.)pearson\.com$/i,
   /(^|\.)pearson\.it$/i,
-  /(^|\.)sanoma.*$/i,
+  /(^|\.)hachette-livre\.fr$/i,
+  /(^|\.)sanoma\.it$/i,
   /(^|\.)zanichelli\.it$/i,
   /(^|\.)educadhoc\.com$/i,
   /(^|\.)hoepli\.it$/i,
@@ -40,23 +41,6 @@ function hostAllowed(url) {
     return false;
   }
   return ALLOWED_HOST.some((re) => re.test(hostname));
-}
-
-function isProbablyBinary(ct) {
-  if (!ct) return false;
-  return !/text|json|xml|javascript|css|svg/.test(ct);
-}
-
-async function readBody(req) {
-  const type = req.headers.get("content-type") || "";
-  if (req.method === "GET") return { url: req.url };
-  if (req.method !== "POST") return null;
-  if (!type.includes("application/json")) return null;
-  try {
-    return await req.json();
-  } catch (_) {
-    return null;
-  }
 }
 
 export async function onRequestPost(context) {
@@ -94,14 +78,18 @@ async function proxyRequest(context) {
   if (!url || typeof url !== "string") {
     return json({ ok: false, error: "missing url" }, 400);
   }
+  const upstreamMethod = String(method || "GET").toUpperCase();
+  if (!["GET", "POST", "HEAD"].includes(upstreamMethod)) {
+    return json({ ok: false, error: "method not allowed (GET, POST, HEAD)" }, 405);
+  }
   if (!hostAllowed(url)) {
     return json({ ok: false, error: "host not allowed by Folio proxy", host: safeHost(url) }, 403);
   }
 
   try {
     const init = {
-      method,
-      redirect: "follow",
+      method: upstreamMethod,
+      redirect: "manual",
       headers: typeof headers === "object" && headers
         ? sanitizeHeaders(headers)
         : undefined
@@ -109,13 +97,38 @@ async function proxyRequest(context) {
 
     if (bodyBase64) {
       init.body = fromBase64(bodyBase64);
-    } else if (method !== "GET" && headers && headers["content-type"]) {
-      // Allow a raw-string body sent as JSON string field.
     }
 
-    const upstream = await fetch(url, init);
+    // Follow redirects manually so every hop is re-checked against the
+    // allowlist — a followed redirect must not open the relay to a host
+    // the first URL would never have passed.
+    const MAX_REDIRECTS = 3;
+    let currentUrl = url;
+    let upstream;
+    for (let hop = 0; ; hop++) {
+      upstream = await fetch(currentUrl, init);
+      const loc = upstream.headers.get("location");
+      if (upstream.status >= 300 && upstream.status < 400 && loc && hop < MAX_REDIRECTS) {
+        let next;
+        try {
+          next = new URL(loc, currentUrl).toString();
+        } catch (_) {
+          return json({ ok: false, error: "invalid redirect location" }, 502);
+        }
+        if (!hostAllowed(next)) {
+          return json({ ok: false, error: "redirect host not allowed by Folio proxy", host: safeHost(next) }, 403);
+        }
+        currentUrl = next;
+        if (upstream.status === 303 || ((upstream.status === 301 || upstream.status === 302) && init.method === "POST")) {
+          init.method = "GET";
+          delete init.body;
+        }
+        continue;
+      }
+      break;
+    }
+
     const buf = new Uint8Array(await upstream.arrayBuffer());
-    const isBin = isProbablyBinary(upstream.headers.get("content-type"));
 
     return json({
       ok: true,
